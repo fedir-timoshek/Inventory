@@ -1,0 +1,2039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ICS Inventory Scanner</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="google-client-id" content="180993117826-pnc9bkd8fg3s29hu8ru612cqg0gmk3ld.apps.googleusercontent.com">
+  <meta name="api-url" content="https://script.google.com/macros/s/AKfycbxEnmSsHkWSW9a6u5NJtbNo12ZK-MRXnnV9VG27j-Lg9N92Ijy3TeYuWL_0wBc7-PoMqQ/exec">
+
+  <!-- ZXing UMD build for browser barcode scanning -->
+  <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <style>
+    :root {
+      --accent: #fb923c;
+      --accent-strong: #ea580c;
+      --accent-soft: #fff7ed;
+      --bg: #f7f7fb;
+      --bg-alt: #eef0f6;
+      --card: #ffffff;
+      --text-main: #111827;
+      --text-muted: #6b7280;
+      --border: #d1d5db;
+      --danger: #ef4444;
+      --success: #16a34a;
+      --shadow-soft: 0 12px 30px rgba(15, 23, 42, 0.1);
+      --radius-lg: 22px;
+      --radius-md: 14px;
+      --radius-pill: 999px;
+      --max-width: 1040px;
+      --control-h: clamp(72px, 9vh, 110px);
+      --control-font: clamp(1.18rem, 1.8vw, 1.46rem);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+      min-height: 100%;
+    }
+
+    body {
+      min-height: 100vh;
+      min-height: 100dvh;
+      font-size: clamp(15px, 2vw, 18px);
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, #f7f7fb 0%, #f0f2f8 40%, #edf0f7 100%);
+    }
+
+    html.is-mobile body { font-size: 16px; }
+
+    .app-shell {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+
+    .app-container {
+      width: 100%;
+      max-width: var(--max-width);
+      padding: 14px 16px calc(46px + env(safe-area-inset-bottom, 0px));
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 100dvh;
+    }
+
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo {
+      width: 54px;
+      height: 54px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1rem;
+      box-shadow: 0 14px 30px rgba(248, 126, 5, 0.5);
+      letter-spacing: 0.6px;
+    }
+
+    .brand-text h1 {
+      margin: 0;
+      font-size: 1.08rem;
+      font-weight: 800;
+    }
+
+    .brand-text p {
+      margin: 3px 0 0;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .user-badge {
+      padding: 10px 14px;
+      border-radius: var(--radius-pill);
+      background: #fff;
+      border: 1px solid var(--border);
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      max-width: 240px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-compact {
+      min-height: 44px;
+      padding: 8px 12px;
+      font-size: 0.86rem;
+      border-radius: 999px;
+    }
+
+    /* Tabs */
+    .tab-bar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .tab-button {
+      border: 2px solid #111;
+      border-radius: 18px;
+      background: #fff;
+      padding: 14px 16px;
+      font-size: var(--control-font);
+      font-weight: 700;
+      cursor: pointer;
+      min-height: var(--control-h);
+      box-shadow: 0 10px 20px rgba(0,0,0,0.05);
+      transition: transform 140ms ease, box-shadow 140ms ease, background 160ms ease;
+    }
+
+    .tab-button.tab-active {
+      background: var(--accent-soft);
+      box-shadow: 0 12px 26px rgba(248,126,5,0.28);
+      transform: translateY(-1px);
+      border-color: #000;
+    }
+
+    .tab-button:active { transform: translateY(1px); }
+    .tab-button:focus-visible { outline: 3px solid var(--accent-strong); outline-offset: 2px; }
+
+    /* Screens */
+    .screen { display: none; flex: 1; }
+    .screen.screen-active {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: calc(100dvh - 130px);
+    }
+
+    html.is-mobile .screen.screen-active { min-height: calc(100dvh - 120px); }
+
+    /* Cards */
+    .card {
+      background: var(--card);
+      border-radius: var(--radius-lg);
+      padding: 16px 16px 20px;
+      box-shadow: var(--shadow-soft);
+      border: 1px solid #111;
+      position: relative;
+    }
+    .screen.screen-active > .card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .section-title {
+      font-size: clamp(1rem, 1.9vw, 1.2rem);
+      font-weight: 800;
+      margin: 4px 0 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section-sub {
+      font-size: clamp(0.95rem, 1.6vw, 1.05rem);
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    /* Form layout */
+    .stack {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    form.stack {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .field label {
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+
+    .pill-input {
+      border: 2px solid #111;
+      border-radius: 18px;
+      padding: clamp(13px, 2.8vw, 16px) clamp(14px, 3.4vw, 18px);
+      font-size: var(--control-font);
+      line-height: 1.2;
+      background: #fff;
+      min-height: var(--control-h);
+      width: 100%;
+    }
+
+    .pill-input.readonly {
+      background: #fff;
+      color: var(--text-muted);
+    }
+
+    .hidden-select { position: absolute; inset: auto; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+    input[type="text"],
+    textarea,
+    select {
+      font-size: var(--control-font);
+      padding: clamp(13px, 2.8vw, 16px) clamp(14px, 3.4vw, 18px);
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      outline: none;
+      width: 100%;
+      min-height: var(--control-h);
+      line-height: 1.2;
+    }
+
+    textarea {
+      min-height: clamp(140px, 24vh, 220px);
+      resize: vertical;
+    }
+
+    .field-row {
+      display: flex;
+      gap: 12px;
+      align-items: stretch;
+      flex-wrap: wrap;
+    }
+
+    .field-row .grow { flex: 1 1 220px; }
+    .field-row .shrink { flex: 0 0 auto; }
+
+    /* Buttons */
+    .btn {
+      border: 2px solid #111;
+      border-radius: 16px;
+      padding: 14px 18px;
+      font-size: var(--control-font);
+      font-weight: 800;
+      cursor: pointer;
+      min-height: var(--control-h);
+      background: #fff;
+      transition: transform 120ms ease, box-shadow 140ms ease, background 160ms ease;
+    }
+
+    .btn:active { transform: translateY(1px); }
+    .btn:focus-visible { outline: 3px solid var(--accent-strong); outline-offset: 2px; }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #111;
+      box-shadow: 0 12px 26px rgba(248,126,5,0.35);
+    }
+
+    .btn-ghost {
+      background: #fff;
+      color: var(--text-main);
+    }
+
+    .btn-danger { background: #fff1f2; color: var(--danger); }
+
+    .actions-bar {
+      position: sticky;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+      z-index: 20;
+      background: var(--card);
+      border-radius: 14px;
+      padding: 10px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.12);
+      backdrop-filter: blur(4px);
+    }
+
+    .actions-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(286px, 1fr));
+      gap: 10px;
+    }
+    form.stack .actions-grid { margin-top: 0; }
+
+    /* Picture row */
+    .media-wrap {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .preview-box {
+      border: 2px dashed #111;
+      border-radius: 18px;
+      min-height: clamp(180px, 28vh, 260px);
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+    }
+
+    .image-preview {
+      width: 100%;
+      max-height: 200px;
+      border-radius: 14px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .remove-image-link {
+      margin-top: 6px;
+      font-size: 0.92rem;
+      color: var(--danger);
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    /* Entries */
+    .entries-header {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .entries-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .entry-card {
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.04);
+    }
+
+    .entry-row-main {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .entry-barcode { font-weight: 800; font-size: 1rem; word-break: break-word; }
+    .entry-room-badge {
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+      padding: 6px 12px;
+      border-radius: 12px;
+      font-weight: 700;
+      max-width: 140px;
+      text-align: right;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .entry-meta { color: var(--text-muted); display:flex; flex-wrap:wrap; gap:8px; font-size:0.9rem; }
+    .entry-notes { color: #374151; }
+    .entry-actions { display:flex; flex-wrap:wrap; gap:8px; }
+
+    /* Sheets / overlays */
+    .sheet {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      pointer-events: none;
+      z-index: 9990;
+    }
+
+    .sheet-backdrop {
+      grid-row: 1 / -1;
+      grid-column: 1 / -1;
+      background: rgba(0,0,0,0.45);
+      opacity: 0;
+      transition: opacity 200ms ease;
+    }
+
+    .sheet-panel {
+      grid-row: 2;
+      grid-column: 1 / -1;
+      background: #fff;
+      border-radius: 20px 20px 0 0;
+      box-shadow: 0 -14px 30px rgba(0,0,0,0.3);
+      transform: translateY(100%);
+      transition: transform 220ms ease;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      padding: 12px 16px 22px;
+      gap: 10px;
+      border: 2px solid #111;
+    }
+
+    .sheet.open { pointer-events: auto; }
+    .sheet.open .sheet-backdrop { opacity: 1; }
+    .sheet.open .sheet-panel { transform: translateY(0); }
+
+    .sheet-handle {
+      width: 56px;
+      height: 6px;
+      border-radius: 8px;
+      background: var(--border);
+      align-self: center;
+      margin-top: 4px;
+    }
+
+    .sheet-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .sheet-header h3 { margin: 0; font-size: 1.1rem; }
+    .sheet-header p { margin: 2px 0 0; color: var(--text-muted); }
+
+    .sheet-body { overflow-y: auto; padding: 6px 0 0; }
+
+    .room-chip {
+      width: 100%;
+      text-align: left;
+      border: 2px solid #111;
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      background: #fff;
+      transition: background 140ms ease, transform 120ms ease;
+      min-height: 48px;
+    }
+
+    .room-chip:hover { background: var(--accent-soft); }
+    .room-chip:active { transform: translateY(1px); }
+
+    /* Scanner specifics */
+    .video-shell {
+      position: relative;
+      width: 100%;
+      background: #020617;
+      border-radius: 16px;
+      overflow: hidden;
+      min-height: 240px;
+      border: 2px solid #111;
+    }
+
+    @supports (aspect-ratio: 4/3) {
+      .video-shell { aspect-ratio: 4 / 3; min-height: 0; }
+    }
+
+    video#videoPreview {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+      background: #000;
+    }
+
+    .scan-frame {
+      position: absolute;
+      inset: 12%;
+      border-radius: 18px;
+      box-shadow:
+        0 0 0 3px rgba(255, 255, 255, 0.35),
+        0 0 0 999px rgba(0, 0, 0, 0.4);
+      pointer-events: none;
+    }
+    .scan-frame::before {
+      content: "";
+      position: absolute;
+      inset: 16%;
+      border-radius: 14px;
+      border: 1px dashed rgba(255,255,255,0.8);
+    }
+
+    .scan-status-strip {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-top: 8px;
+      font-weight: 700;
+      color: #0b1727;
+    }
+
+    .scan-status-badge {
+      padding: 6px 12px;
+      border-radius: 12px;
+      background: #111;
+      color: #fff;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .scan-video-shell-success { box-shadow: 0 0 0 3px var(--success) inset; transition: box-shadow 160ms ease; }
+
+    .torch-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    .torch-badge {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .auth-screen {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(15, 23, 42, 0.35);
+      z-index: 10020;
+    }
+
+    .auth-card {
+      width: min(420px, 100%);
+      background: #fff;
+      border: 2px solid #111;
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      box-shadow: var(--shadow-soft);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      text-align: left;
+    }
+
+    .auth-card .section-sub {
+      margin-bottom: 6px;
+    }
+
+    /* Toasts */
+    .toast-container {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10000;
+      width: min(460px, 94%);
+      pointer-events: none;
+    }
+
+    .toast {
+      pointer-events: auto;
+      margin-top: 10px;
+      padding: 12px 16px;
+      border-radius: 14px;
+      font-size: 0.96rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: #fff;
+      background: #111827;
+      box-shadow: 0 14px 30px rgba(0,0,0,0.28);
+      opacity: 0;
+      transform: translateY(12px);
+      animation: toast-in 200ms ease-out forwards;
+    }
+
+    .toast-success { background: var(--success); }
+    .toast-error { background: var(--danger); }
+    .toast-info { background: #0284c7; }
+    .toast-hide { animation: toast-out 180ms ease-in forwards; }
+
+    @keyframes toast-in { from { opacity:0; transform: translateY(12px);} to {opacity:1; transform: translateY(0);} }
+    @keyframes toast-out { from { opacity:1; transform: translateY(0);} to {opacity:0; transform: translateY(6px);} }
+
+    /* Helpers */
+    .hidden { display: none !important; }
+    .muted { color: var(--text-muted); }
+
+    @media (min-width: 760px) {
+      .media-wrap { grid-template-columns: 1fr 1fr; }
+      .app-container { padding-inline: 22px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+
+    @media (max-width: 900px) {
+      :root { --max-width: 100%; }
+      .app-container { padding-inline: 12px; padding-bottom: calc(52px + env(safe-area-inset-bottom, 0px)); }
+      .tab-button { min-height: calc(var(--control-h) + 10px); }
+      .btn { min-height: calc(var(--control-h) + 8px); padding: 16px 18px; }
+      .pill-input { min-height: calc(var(--control-h) + 6px); }
+      .preview-box { min-height: clamp(160px, 26vh, 230px); }
+      textarea { min-height: clamp(130px, 22vh, 200px); }
+      .field-row { flex-direction: column; align-items: stretch; }
+      .field-row .grow, .field-row .shrink, .actions-grid > * { width: 100%; }
+      .actions-grid { grid-template-columns: 1fr; }
+      .card { padding-bottom: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="authScreen" class="auth-screen hidden" aria-live="polite">
+    <div class="auth-card">
+      <div class="section-title">Sign in</div>
+      <div class="section-sub">Use your Google account to continue.</div>
+      <div id="googleSignInButton"></div>
+      <div id="authError" class="muted hidden"></div>
+    </div>
+  </div>
+  <div class="app-shell">
+    <div class="app-container">
+      <header class="app-header">
+        <div class="brand">
+          <div class="brand-logo" aria-hidden="true">ICS</div>
+          <div class="brand-text">
+            <h1>ICS Inventory</h1>
+            <p>Scan &amp; register items into Google Sheets</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <div id="userBadge" class="user-badge" title="Signed-in user"></div>
+          <button id="btnSignOut" type="button" class="btn btn-ghost btn-compact hidden">Sign out</button>
+        </div>
+      </header>
+
+      <nav class="tab-bar" aria-label="Main views">
+        <button id="tabScan" class="tab-button tab-active" type="button">Scan</button>
+        <button id="tabEntries" class="tab-button" type="button">Entries</button>
+      </nav>
+
+      <!-- Scan Screen -->
+      <main id="screenScan" class="screen screen-active" role="tabpanel" aria-labelledby="tabScan">
+        <section class="card">
+          <div class="section-title">Quick capture</div>
+          <div class="section-sub">Large, touch-friendly controls. Open tools in sheets.</div>
+
+          <form id="itemForm" class="stack" novalidate>
+            <div class="field">
+              <label for="inputBarcode">Barcode</label>
+              <div class="field-row">
+                <input id="inputBarcode" type="text" autocomplete="off" placeholder="Scan or type barcode" inputmode="numeric" class="pill-input grow">
+                <button id="btnOpenScanner" type="button" class="btn btn-primary shrink">📷 Scan</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="selectRoom">Location</label>
+              <div class="field-row">
+                <div id="roomDisplay" class="pill-input readonly grow" tabindex="0">Select a room</div>
+                <button id="btnOpenRoomSheet" type="button" class="btn btn-primary shrink">📍 Pick</button>
+              </div>
+              <select id="selectRoom" class="hidden-select">
+                <option value="">Choose room…</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>Picture</label>
+              <div class="media-wrap">
+                <div class="stack">
+                  <button id="takePhotoButton" type="button" class="btn btn-ghost">📷 Take picture</button>
+                  <button id="choosePhotoButton" type="button" class="btn btn-ghost">🖼 Upload image</button>
+                </div>
+                <div class="preview-box">
+                  <div style="width:100%;">
+                    <img id="imagePreview" class="image-preview hidden" alt="Selected item image preview">
+                    <div id="removeImageButton" class="remove-image-link hidden">Remove image</div>
+                    <div id="imagePlaceholder" class="muted">Preview</div>
+                  </div>
+                </div>
+              </div>
+              <input id="takePhotoInput" type="file" accept="image/*" capture="environment" class="hidden">
+              <input id="choosePhotoInput" type="file" accept="image/*" class="hidden">
+            </div>
+
+            <div class="field">
+              <label for="inputNotes">Notes</label>
+              <textarea id="inputNotes" placeholder="Notes, description, condition..." class="pill-input"></textarea>
+            </div>
+
+            <div class="actions-bar">
+              <div class="actions-grid">
+                <button id="btnSaveItem" type="submit" class="btn btn-primary">💾 Save item</button>
+                <button id="btnClearForm" type="button" class="btn btn-ghost">✨ Clear form</button>
+                <button id="btnSyncScan" type="button" class="btn btn-ghost">⤴ Sync queued items</button>
+              </div>
+            </div>
+
+            <div id="offlineBadge" class="muted hidden">⚠ Offline queue: <span id="offlineBadgeCount">0</span> item(s) waiting to sync</div>
+          </form>
+        </section>
+      </main>
+
+      <!-- Entries Screen -->
+      <main id="screenEntries" class="screen" role="tabpanel" aria-labelledby="tabEntries">
+        <section class="card" aria-label="Recent entries">
+          <div class="section-title">Entries</div>
+          <div class="entries-header">
+            <input id="searchInput" type="text" placeholder="Search by barcode, room or notes…" class="pill-input grow">
+            <button id="btnRefreshEntries" type="button" class="btn btn-ghost shrink">⟳ Refresh</button>
+            <button id="btnSyncEntries" type="button" class="btn btn-ghost shrink">⤴ Sync queued</button>
+          </div>
+
+          <div id="adminBar" class="muted" style="display:none;">
+            <strong>Admin</strong> mode enabled
+            <label style="margin-left:8px; display:inline-flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="adminModeToggle">
+              <span>Toggle</span>
+            </label>
+          </div>
+
+          <div id="entriesList" class="entries-list" aria-live="polite"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- Scanner Sheet -->
+  <div id="scannerSheet" class="sheet" aria-hidden="true">
+    <div id="scannerSheetBackdrop" class="sheet-backdrop"></div>
+    <div id="scannerSheetPanel" class="sheet-panel" role="dialog" aria-modal="true" aria-label="Barcode scanner">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <div>
+          <h3>Scan barcode</h3>
+          <p>Hold the code in the frame</p>
+        </div>
+        <button id="btnCloseScannerSheet" type="button" class="btn">✕</button>
+      </div>
+      <div class="sheet-body">
+        <div id="cameraSupportMessage" class="muted hidden">
+          Camera scanning is not available in this browser. You can still type barcodes manually.
+        </div>
+        <div id="videoShell" class="video-shell">
+          <video id="videoPreview" playsinline muted></video>
+          <div class="scan-frame" aria-hidden="true"></div>
+        </div>
+        <div class="scan-status-strip">
+          <div id="scanStatus">Camera off</div>
+          <div id="scanStatusBadge" class="scan-status-badge">Idle</div>
+        </div>
+        <div class="field-row" style="margin-top:8px; flex-wrap:wrap;">
+          <label class="muted" style="display:flex; align-items:center; gap:6px;">
+            <input type="checkbox" id="continuousToggle"> Continuous
+          </label>
+          <div id="cameraSelectRow" class="muted hidden" style="display:flex; align-items:center; gap:6px;">
+            <span>Camera</span>
+            <select id="cameraSelect" class="pill-input" style="min-width:170px; min-height:44px; padding:10px 12px; border-radius:12px; border:1px solid var(--border);"></select>
+          </div>
+        </div>
+        <div class="field-row" style="margin-top:6px;">
+          <button id="btnStartScan" type="button" class="btn btn-primary grow">▶ Start</button>
+          <button id="btnStopScan" type="button" class="btn btn-ghost shrink">■ Stop</button>
+        </div>
+        <div id="torchRow" class="torch-row hidden">
+          <button id="btnToggleTorch" type="button" class="btn btn-ghost">🔦 Flashlight</button>
+          <span id="torchHint" class="torch-badge">Not supported</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rooms Sheet -->
+  <div id="roomSheet" class="sheet" aria-hidden="true">
+    <div id="roomSheetBackdrop" class="sheet-backdrop"></div>
+    <div id="roomSheetPanel" class="sheet-panel" role="dialog" aria-modal="true" aria-label="Choose room">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <div>
+          <h3>Choose room</h3>
+          <p>Select a location</p>
+        </div>
+        <button id="btnCloseRoomSheet" type="button" class="btn">✕</button>
+      </div>
+      <div id="roomList" class="sheet-body stack"></div>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var OFFLINE_QUEUE_KEY = 'icsInventoryOfflineQueue_v1';
+      var AUTH_TOKEN_KEY = 'icsInventoryAuthToken_v1';
+      var APP_CONFIG = {
+        googleClientId: '',
+        apiUrl: ''
+      };
+
+      var appState = {
+        entries: [],
+        filteredEntries: [],
+        rooms: [],
+        isAdmin: false,
+        adminMode: false,
+        userEmail: '',
+        authToken: '',
+        scanning: false,
+        continuousScanning: false,
+        cameraSupported: false,
+        selectedCameraId: '',
+        torchSupported: false,
+        torchOn: false,
+        selectedImageDataUrl: null,
+        offlineQueue: [],
+        filterText: '',
+        editingEntryId: null,
+        scannerSheetOpen: false
+      };
+
+      var scanner = {
+        codeReader: null,
+        lastCode: '',
+        lastCodeTime: 0,
+        cooldownMs: 1500,
+        autoCloseTimer: null
+      };
+
+      var dom = {};
+
+      function $(id) { return document.getElementById(id); }
+      function hasServer() { return !!(APP_CONFIG.apiUrl && APP_CONFIG.apiUrl.indexOf('http') === 0); }
+
+      function cacheDom() {
+        dom.tabScan = $('tabScan');
+        dom.tabEntries = $('tabEntries');
+        dom.screenScan = $('screenScan');
+        dom.screenEntries = $('screenEntries');
+        dom.userBadge = $('userBadge');
+        dom.btnSignOut = $('btnSignOut');
+        dom.authScreen = $('authScreen');
+        dom.googleSignInButton = $('googleSignInButton');
+        dom.authError = $('authError');
+
+        dom.videoShell = $('videoShell');
+        dom.video = $('videoPreview');
+        dom.scanStatus = $('scanStatus');
+        dom.scanStatusBadge = $('scanStatusBadge');
+        dom.cameraSupportMessage = $('cameraSupportMessage');
+        dom.cameraSelectRow = $('cameraSelectRow');
+        dom.cameraSelect = $('cameraSelect');
+        dom.continuousToggle = $('continuousToggle');
+        dom.btnStartScan = $('btnStartScan');
+        dom.btnStopScan = $('btnStopScan');
+        dom.torchRow = $('torchRow');
+        dom.btnToggleTorch = $('btnToggleTorch');
+        dom.torchHint = $('torchHint');
+
+        dom.itemForm = $('itemForm');
+        dom.inputBarcode = $('inputBarcode');
+        dom.btnOpenScanner = $('btnOpenScanner');
+        dom.selectRoom = $('selectRoom');
+        dom.roomDisplay = $('roomDisplay');
+        dom.btnOpenRoomSheet = $('btnOpenRoomSheet');
+        dom.inputNotes = $('inputNotes');
+
+        dom.takePhotoButton = $('takePhotoButton');
+        dom.choosePhotoButton = $('choosePhotoButton');
+        dom.takePhotoInput = $('takePhotoInput');
+        dom.choosePhotoInput = $('choosePhotoInput');
+        dom.imagePreview = $('imagePreview');
+        dom.removeImageButton = $('removeImageButton');
+        dom.imagePlaceholder = $('imagePlaceholder');
+
+        dom.btnSaveItem = $('btnSaveItem');
+        dom.btnClearForm = $('btnClearForm');
+        dom.btnSyncScan = $('btnSyncScan');
+
+        dom.offlineBadge = $('offlineBadge');
+        dom.offlineBadgeCount = $('offlineBadgeCount');
+
+        dom.searchInput = $('searchInput');
+        dom.btnRefreshEntries = $('btnRefreshEntries');
+        dom.btnSyncEntries = $('btnSyncEntries');
+        dom.entriesList = $('entriesList');
+        dom.adminBar = $('adminBar');
+        dom.adminModeToggle = $('adminModeToggle');
+
+        dom.scannerSheet = $('scannerSheet');
+        dom.scannerSheetBackdrop = $('scannerSheetBackdrop');
+        dom.btnCloseScannerSheet = $('btnCloseScannerSheet');
+
+        dom.roomSheet = $('roomSheet');
+        dom.roomSheetBackdrop = $('roomSheetBackdrop');
+        dom.btnCloseRoomSheet = $('btnCloseRoomSheet');
+        dom.roomList = $('roomList');
+
+        dom.toastContainer = $('toastContainer');
+      }
+
+      function bindEvents() {
+        dom.tabScan.onclick = function () { switchTab('scan'); };
+        dom.tabEntries.onclick = function () { switchTab('entries'); };
+        if (dom.btnSignOut) {
+          dom.btnSignOut.onclick = function () { handleSignOut(); };
+        }
+
+        dom.btnStartScan.onclick = startScanner;
+        dom.btnStopScan.onclick = stopScanner;
+        dom.btnToggleTorch.onclick = function () { toggleTorch(); };
+        dom.continuousToggle.onchange = function () {
+          appState.continuousScanning = !!dom.continuousToggle.checked;
+        };
+        if (dom.cameraSelect) {
+          dom.cameraSelect.onchange = function () {
+            appState.selectedCameraId = dom.cameraSelect.value || '';
+            if (appState.scanning) {
+              stopScanner();
+              startScanner();
+            }
+          };
+        }
+
+        dom.btnOpenScanner.onclick = function () {
+          openScannerSheet();
+        };
+
+        dom.btnCloseScannerSheet.onclick = function () { closeScannerSheet(); };
+        dom.scannerSheetBackdrop.onclick = function () { closeScannerSheet(); };
+        document.addEventListener('keydown', function (evt) {
+          if (evt.key === 'Escape') {
+            closeScannerSheet();
+            closeRoomSheet();
+          }
+        });
+
+        dom.btnOpenRoomSheet.onclick = openRoomSheet;
+        dom.btnCloseRoomSheet.onclick = closeRoomSheet;
+        dom.roomSheetBackdrop.onclick = closeRoomSheet;
+
+        dom.itemForm.onsubmit = function (e) {
+          if (e && e.preventDefault) { e.preventDefault(); }
+          saveCurrentItem();
+          return false;
+        };
+
+        dom.btnClearForm.onclick = function () { clearForm(); };
+
+        dom.takePhotoButton.onclick = function () {
+          if (dom.takePhotoInput) { dom.takePhotoInput.click(); }
+        };
+        dom.choosePhotoButton.onclick = function () {
+          if (dom.choosePhotoInput) { dom.choosePhotoInput.click(); }
+        };
+        dom.takePhotoInput.onchange = handleImageFileChange;
+        dom.choosePhotoInput.onchange = handleImageFileChange;
+        dom.removeImageButton.onclick = function () { clearSelectedImage(); };
+
+        dom.btnSyncScan.onclick = function () { syncOfflineQueue(); };
+        dom.btnSyncEntries.onclick = function () { syncOfflineQueue(); };
+
+        window.addEventListener('online', function () { syncOfflineQueue(); });
+        window.addEventListener('focus', function () { syncOfflineQueue(); });
+        window.addEventListener('pagehide', function () { stopScanner(); closeScannerSheet({ skipFocus: true }); });
+        window.addEventListener('resize', debounce(handleLayoutChange, 120));
+
+        dom.searchInput.oninput = function () {
+          appState.filterText = dom.searchInput.value || '';
+          applyFilterAndRender();
+        };
+        dom.btnRefreshEntries.onclick = function () { refreshEntriesFromServer(); };
+        if (dom.adminModeToggle) {
+          dom.adminModeToggle.onchange = function () {
+            appState.adminMode = !!dom.adminModeToggle.checked;
+            appState.editingEntryId = null;
+            renderEntries();
+          };
+        }
+        dom.entriesList.onclick = handleEntriesListClick;
+      }
+
+      function debounce(fn, wait) {
+        var timeout;
+        return function () {
+          var args = arguments;
+          clearTimeout(timeout);
+          timeout = setTimeout(function () { fn.apply(null, args); }, wait);
+        };
+      }
+
+      /* Auth */
+      function initConfig() {
+        var metaClient = document.querySelector('meta[name="google-client-id"]');
+        if (metaClient && metaClient.content) {
+          APP_CONFIG.googleClientId = metaClient.content;
+        }
+        var metaApi = document.querySelector('meta[name="api-url"]');
+        if (metaApi && metaApi.content) {
+          APP_CONFIG.apiUrl = metaApi.content;
+        }
+      }
+
+      function getGoogleClientId() {
+        return APP_CONFIG.googleClientId || '';
+      }
+
+      function showAuthScreen(show) {
+        if (!dom.authScreen) { return; }
+        dom.authScreen.classList.toggle('hidden', !show);
+      }
+
+      function showAuthError(message) {
+        if (!dom.authError) { return; }
+        if (message) {
+          dom.authError.textContent = message;
+          dom.authError.classList.remove('hidden');
+        } else {
+          dom.authError.textContent = '';
+          dom.authError.classList.add('hidden');
+        }
+      }
+
+      function setAuthToken(token) {
+        appState.authToken = token || '';
+        try {
+          if (window.localStorage) {
+            if (appState.authToken) {
+              localStorage.setItem(AUTH_TOKEN_KEY, appState.authToken);
+            } else {
+              localStorage.removeItem(AUTH_TOKEN_KEY);
+            }
+          }
+        } catch (e) {}
+      }
+
+      function loadStoredToken() {
+        try {
+          if (!window.localStorage) { return ''; }
+          return localStorage.getItem(AUTH_TOKEN_KEY) || '';
+        } catch (e) {
+          return '';
+        }
+      }
+
+      function handleSignOut() {
+        setAuthToken('');
+        appState.userEmail = '';
+        updateUserBadge();
+        showAuthScreen(true);
+      }
+
+      function initAuth() {
+        waitForGsi(0);
+      }
+
+      function waitForGsi(attempts) {
+        var clientId = getGoogleClientId();
+        if (!clientId) {
+          showAuthError('Missing Google client ID configuration.');
+          showAuthScreen(true);
+          return;
+        }
+        if (window.google && google.accounts && google.accounts.id) {
+          initializeGsi(clientId);
+          return;
+        }
+        if (attempts >= 20) {
+          showAuthError('Google sign-in library failed to load.');
+          showAuthScreen(true);
+          return;
+        }
+        setTimeout(function () { waitForGsi(attempts + 1); }, 250);
+      }
+
+      function initializeGsi(clientId) {
+        google.accounts.id.initialize({
+          client_id: clientId,
+          callback: handleCredentialResponse
+        });
+        if (dom.googleSignInButton) {
+          google.accounts.id.renderButton(dom.googleSignInButton, {
+            theme: 'outline',
+            size: 'large',
+            text: 'continue_with',
+            shape: 'pill'
+          });
+        }
+
+        var storedToken = loadStoredToken();
+        if (storedToken) {
+          attemptAuth(storedToken);
+        } else {
+          showAuthScreen(true);
+        }
+      }
+
+      function handleCredentialResponse(response) {
+        var token = response && response.credential ? response.credential : '';
+        if (!token) {
+          showAuthError('Sign-in failed. Please try again.');
+          showAuthScreen(true);
+          return;
+        }
+        attemptAuth(token);
+      }
+
+      function attemptAuth(idToken) {
+        if (!hasServer()) {
+          showAuthError('Authentication requires the API URL.');
+          showAuthScreen(true);
+          return;
+        }
+        showAuthError('');
+        showAuthScreen(true);
+        callApi('getInitialData', idToken, {})
+          .then(function (data) {
+            setAuthToken(idToken);
+            showAuthScreen(false);
+            handleInitialData(data);
+            if (appState.offlineQueue && appState.offlineQueue.length) {
+              syncOfflineQueue();
+            }
+          })
+          .catch(function () {
+            setAuthToken('');
+            showAuthError('Sign-in failed. Please sign in again.');
+            showAuthScreen(true);
+          });
+      }
+
+      function ensureAuth() {
+        if (!appState.authToken) {
+          showAuthScreen(true);
+          showToast('Please sign in to continue.', 'error');
+          return false;
+        }
+        return true;
+      }
+
+      function callApi(action, token, payload) {
+        if (!hasServer()) {
+          return Promise.reject(new Error('Missing API URL.'));
+        }
+        var body = JSON.stringify({ action: action, token: token || '', payload: payload || {} });
+        return fetch(APP_CONFIG.apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: body
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (json) {
+            if (!json || json.ok !== true) {
+              throw new Error(json && json.error ? json.error : 'API error');
+            }
+            return json.data;
+          });
+      }
+
+      function switchTab(tabName) {
+        if (tabName === 'entries') {
+          dom.screenScan.classList.remove('screen-active');
+          dom.screenEntries.classList.add('screen-active');
+          dom.tabScan.classList.remove('tab-active');
+          dom.tabEntries.classList.add('tab-active');
+          if (appState.scanning) { stopScanner(); }
+          closeScannerSheet({ skipFocus: true });
+        } else {
+          dom.screenEntries.classList.remove('screen-active');
+          dom.screenScan.classList.add('screen-active');
+          dom.tabEntries.classList.remove('tab-active');
+          dom.tabScan.classList.add('tab-active');
+        }
+      }
+
+      /* Layout */
+      function handleLayoutChange() {
+        var width = window.innerWidth || document.documentElement.clientWidth || 0;
+        document.documentElement.classList.toggle('is-mobile', width < 860);
+      }
+
+      /* Scanner */
+      function initScannerSupport() {
+        appState.cameraSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+        if (!appState.cameraSupported) {
+          setScanStatus('Camera scanning is not supported.', 'Idle');
+          dom.cameraSupportMessage.classList.remove('hidden');
+          dom.btnStartScan.disabled = true;
+          dom.btnStopScan.disabled = true;
+          if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
+          return;
+        }
+        dom.cameraSupportMessage.classList.add('hidden');
+        dom.btnStartScan.disabled = false;
+        dom.btnStopScan.disabled = false;
+
+        try {
+          if (window.ZXing && ZXing.BrowserMultiFormatReader && typeof Promise !== 'undefined') {
+            var tempReader = new ZXing.BrowserMultiFormatReader();
+            tempReader.listVideoInputDevices()
+              .then(function (devices) {
+                if (!devices || devices.length <= 1) {
+                  dom.cameraSelectRow.classList.add('hidden');
+                  return;
+                }
+                dom.cameraSelectRow.classList.remove('hidden');
+                dom.cameraSelect.innerHTML = '';
+                var opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'Auto (rear preferred)';
+                dom.cameraSelect.appendChild(opt);
+                for (var i = 0; i < devices.length; i++) {
+                  var d = devices[i];
+                  var option = document.createElement('option');
+                  option.value = d.deviceId || d.id || '';
+                  option.textContent = d.label || ('Camera ' + (i + 1));
+                  dom.cameraSelect.appendChild(option);
+                }
+              })
+              .catch(function () { dom.cameraSelectRow.classList.add('hidden'); });
+          }
+        } catch (e) {
+          dom.cameraSelectRow.classList.add('hidden');
+        }
+        setScanStatus('Camera off', 'Idle');
+      }
+
+      function openScannerSheet() {
+        dom.scannerSheet.classList.add('open');
+        dom.scannerSheet.setAttribute('aria-hidden', 'false');
+        appState.scannerSheetOpen = true;
+        startScanner();
+      }
+
+      function closeScannerSheet(options) {
+        options = options || {};
+        if (!appState.scannerSheetOpen) { return; }
+        appState.scannerSheetOpen = false;
+        dom.scannerSheet.classList.remove('open');
+        dom.scannerSheet.setAttribute('aria-hidden', 'true');
+        stopScanner();
+        if (scanner.autoCloseTimer) {
+          clearTimeout(scanner.autoCloseTimer);
+          scanner.autoCloseTimer = null;
+        }
+        if (!options.skipFocus) {
+          if (options.focusRoom) {
+            focusRoomField();
+          } else if (dom.inputBarcode && typeof dom.inputBarcode.focus === 'function') {
+            dom.inputBarcode.focus();
+          }
+        }
+      }
+
+      function startScanner() {
+        if (!appState.cameraSupported) {
+          showToast('Camera scanning is not available on this device.', 'error');
+          return;
+        }
+        if (appState.scanning) { return; }
+
+        if (!(window.ZXing && ZXing.BrowserMultiFormatReader)) {
+          setScanStatus('Scanner library failed to load.', 'Error');
+          showToast('Barcode scanner library not available.', 'error');
+          return;
+        }
+
+        if (!scanner.codeReader) {
+          scanner.codeReader = new ZXing.BrowserMultiFormatReader();
+        }
+
+        appState.scanning = true;
+        appState.torchSupported = false;
+        appState.torchOn = false;
+        updateTorchUI();
+        updateScanButtons(true);
+        setScanStatus('Requesting camera…', 'Scanning');
+
+        var deviceId = appState.selectedCameraId || undefined;
+        try {
+          var startPromise = scanner.codeReader.decodeFromVideoDevice(deviceId, dom.video, function (result, err) {
+            if (!appState.scanning) { return; }
+            if (result) {
+              var text = result.text || (result.getText ? result.getText() : '');
+              onBarcodeDetected(text);
+            } else if (err && err.name !== 'NotFoundException') { console.log('Decode error:', err); }
+          });
+          if (startPromise && typeof startPromise.catch === 'function') {
+            startPromise.catch(function (err) {
+              appState.scanning = false;
+              updateScanButtons(false);
+              setScanStatus('Camera error: ' + (err && err.message ? err.message : ''), 'Error');
+              showToast('Could not start camera. Check permissions.', 'error');
+            });
+          }
+          setScanStatus('Scanning…', 'Scanning');
+          scheduleTorchCheck();
+        } catch (e) {
+          appState.scanning = false;
+          updateScanButtons(false);
+          setScanStatus('Camera error: ' + (e && e.message ? e.message : ''), 'Error');
+          showToast('Could not start camera.', 'error');
+        }
+      }
+
+      function stopScanner() {
+        appState.scanning = false;
+        if (appState.torchOn) { setTorchEnabled(false, false); }
+        appState.torchSupported = false;
+        appState.torchOn = false;
+        updateTorchUI();
+        updateScanButtons(false);
+        try {
+          if (scanner.codeReader && typeof scanner.codeReader.reset === 'function') { scanner.codeReader.reset(); }
+        } catch (e) { console.log('Error resetting reader:', e); }
+
+        try {
+          if (dom.video && dom.video.srcObject && typeof dom.video.srcObject.getTracks === 'function') {
+            dom.video.srcObject.getTracks().forEach(function (t) { t.stop(); });
+          }
+          if (dom.video) { dom.video.srcObject = null; }
+        } catch (err) { console.log('Error stopping camera tracks:', err); }
+
+        setScanStatus('Camera off', 'Idle');
+      }
+
+      function getActiveVideoTrack() {
+        try {
+          if (dom.video && dom.video.srcObject && typeof dom.video.srcObject.getVideoTracks === 'function') {
+            var tracks = dom.video.srcObject.getVideoTracks();
+            return tracks && tracks.length ? tracks[0] : null;
+          }
+        } catch (e) {}
+        return null;
+      }
+
+      function scheduleTorchCheck() {
+        var attempts = 0;
+        function check() {
+          attempts++;
+          if (!appState.scanning) { return; }
+          var track = getActiveVideoTrack();
+          if (track) {
+            refreshTorchSupport(track);
+            return;
+          }
+          if (attempts < 10) { setTimeout(check, 200); }
+        }
+        setTimeout(check, 200);
+      }
+
+      function refreshTorchSupport(track) {
+        var supported = false;
+        if (track && typeof track.getCapabilities === 'function') {
+          var caps = track.getCapabilities();
+          supported = !!(caps && caps.torch);
+        } else if (track && typeof track.applyConstraints === 'function') {
+          supported = true;
+        }
+        appState.torchSupported = supported;
+        if (!supported) { appState.torchOn = false; }
+        updateTorchUI();
+      }
+
+      function updateTorchUI() {
+        if (!dom.torchRow || !dom.btnToggleTorch || !dom.torchHint) { return; }
+        var shouldShow = appState.scanning;
+        dom.torchRow.classList.toggle('hidden', !shouldShow);
+        dom.btnToggleTorch.disabled = !appState.torchSupported;
+        dom.btnToggleTorch.textContent = appState.torchOn ? '🔦 Flashlight on' : '🔦 Flashlight';
+        dom.torchHint.textContent = appState.torchSupported ? (appState.torchOn ? 'On' : 'Off') : 'Not supported';
+      }
+
+      function toggleTorch() {
+        if (!appState.torchSupported) { return; }
+        setTorchEnabled(!appState.torchOn, true);
+      }
+
+      function setTorchEnabled(enabled, showFailureToast) {
+        var track = getActiveVideoTrack();
+        if (!track || typeof track.applyConstraints !== 'function') { return; }
+        var constraints = { advanced: [{ torch: !!enabled }] };
+        track.applyConstraints(constraints)
+          .then(function () {
+            appState.torchOn = !!enabled;
+            updateTorchUI();
+          })
+          .catch(function () {
+            appState.torchOn = false;
+            updateTorchUI();
+            if (showFailureToast) { showToast('Flashlight not available on this camera.', 'error'); }
+          });
+      }
+
+      function onBarcodeDetected(text) {
+        if (!text) { return; }
+        var now = Date.now();
+        if (scanner.lastCode === text && (now - scanner.lastCodeTime) < scanner.cooldownMs) { return; }
+        scanner.lastCode = text;
+        scanner.lastCodeTime = now;
+
+        dom.inputBarcode.value = text;
+        setScanStatus('Barcode: ' + text, 'Detected');
+        flashScannerSuccess();
+        triggerVibrate(80);
+
+        if (!appState.continuousScanning) {
+          if (scanner.autoCloseTimer) { clearTimeout(scanner.autoCloseTimer); }
+          scanner.autoCloseTimer = setTimeout(function () {
+            closeScannerSheet({ focusRoom: true });
+          }, 320);
+        } else {
+          focusRoomField();
+        }
+      }
+
+      function setScanStatus(text, badge) {
+        if (dom.scanStatus) { dom.scanStatus.textContent = text || ''; }
+        if (dom.scanStatusBadge) { dom.scanStatusBadge.textContent = badge || 'Status'; }
+      }
+      function updateScanButtons(isScanning) {
+        dom.btnStartScan.disabled = !!isScanning;
+        dom.btnStopScan.disabled = !isScanning;
+      }
+      function flashScannerSuccess() {
+        dom.videoShell.classList.add('scan-video-shell-success');
+        setTimeout(function () { dom.videoShell.classList.remove('scan-video-shell-success'); }, 190);
+      }
+      function focusRoomField() {
+        try { if (dom.selectRoom && typeof dom.selectRoom.focus === 'function') { dom.selectRoom.focus(); } } catch (e) {}
+      }
+      function triggerVibrate(ms) { try { if (navigator && typeof navigator.vibrate === 'function') { navigator.vibrate(ms); } } catch (e) {} }
+
+      /* Rooms */
+      function openRoomSheet() {
+        renderRoomList();
+        dom.roomSheet.classList.add('open');
+        dom.roomSheet.setAttribute('aria-hidden', 'false');
+      }
+      function closeRoomSheet() {
+        dom.roomSheet.classList.remove('open');
+        dom.roomSheet.setAttribute('aria-hidden', 'true');
+      }
+      function renderRoomList() {
+        dom.roomList.innerHTML = '';
+        if (!appState.rooms || !appState.rooms.length) {
+          var empty = document.createElement('div');
+          empty.className = 'muted';
+          empty.textContent = 'No rooms available.';
+          dom.roomList.appendChild(empty);
+          return;
+        }
+        for (var i = 0; i < appState.rooms.length; i++) {
+          (function (room) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'room-chip';
+            btn.textContent = room;
+            btn.onclick = function () { selectRoom(room); };
+            dom.roomList.appendChild(btn);
+          })(appState.rooms[i]);
+        }
+      }
+      function selectRoom(room) {
+        dom.selectRoom.value = room || '';
+        dom.roomDisplay.textContent = room || 'Select a room';
+        closeRoomSheet();
+      }
+
+      /* Images */
+      function handleImageFileChange(evt) {
+        var input = evt.target || evt.srcElement;
+        if (!input || !input.files || !input.files.length) { return; }
+        var file = input.files[0];
+        var reader = new FileReader();
+        reader.onload = function (e) {
+          var dataUrl = e.target && e.target.result ? e.target.result : null;
+          if (!dataUrl) { return; }
+          appState.selectedImageDataUrl = dataUrl;
+          dom.imagePreview.src = dataUrl;
+          dom.imagePreview.classList.remove('hidden');
+          dom.imagePlaceholder.classList.add('hidden');
+          dom.removeImageButton.classList.remove('hidden');
+        };
+        reader.readAsDataURL(file);
+      }
+      function clearSelectedImage() {
+        appState.selectedImageDataUrl = null;
+        dom.imagePreview.src = '';
+        dom.imagePreview.classList.add('hidden');
+        dom.imagePlaceholder.classList.remove('hidden');
+        dom.removeImageButton.classList.add('hidden');
+        if (dom.takePhotoInput) { dom.takePhotoInput.value = ''; }
+        if (dom.choosePhotoInput) { dom.choosePhotoInput.value = ''; }
+      }
+
+      /* Form */
+      function clearForm() {
+        dom.inputBarcode.value = '';
+        dom.inputNotes.value = '';
+        dom.selectRoom.value = '';
+        dom.roomDisplay.textContent = 'Select a room';
+        clearSelectedImage();
+        dom.inputBarcode.focus();
+      }
+
+      function saveCurrentItem() {
+        if (!ensureAuth()) { return; }
+        var barcode = (dom.inputBarcode.value || '').toString().trim();
+        var room = (dom.selectRoom.value || '').toString().trim();
+        var notes = (dom.inputNotes.value || '').toString().trim();
+
+        if (!barcode) {
+          showToast('Please scan or type a barcode.', 'error');
+          dom.inputBarcode.focus();
+          return;
+        }
+        if (!room) {
+          showToast('Please choose a room / location.', 'error');
+          if (dom.btnOpenRoomSheet && dom.btnOpenRoomSheet.focus) {
+            dom.btnOpenRoomSheet.focus();
+          }
+          return;
+        }
+
+        var payload = { barcode: barcode, room: room, notes: notes, imageDataUrl: appState.selectedImageDataUrl || '' };
+        if (!hasServer()) {
+          showToast('Cannot save without API access.', 'error');
+          return;
+        }
+
+        dom.btnSaveItem.disabled = true;
+        dom.btnSaveItem.textContent = 'Saving…';
+
+        callApi('saveEntry', appState.authToken, payload)
+          .then(function (entry) {
+            dom.btnSaveItem.disabled = false;
+            dom.btnSaveItem.textContent = '💾 Save item';
+            showToast('Item saved.', 'success');
+            triggerVibrate(60);
+            if (entry && entry.id) {
+              appState.entries.unshift(entry);
+              applyFilterAndRender();
+            }
+            dom.inputBarcode.value = '';
+            dom.inputNotes.value = '';
+            clearSelectedImage();
+          })
+          .catch(function () {
+            dom.btnSaveItem.disabled = false;
+            dom.btnSaveItem.textContent = '💾 Save item';
+            enqueueOfflineEntry(payload);
+            showToast('Saved locally; will sync when back online.', 'info');
+          });
+      }
+
+      /* Offline queue */
+      function loadOfflineQueue() {
+        appState.offlineQueue = [];
+        try {
+          if (!window.localStorage) { return; }
+          var raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
+          if (!raw) { return; }
+          var parsed = JSON.parse(raw);
+          if (parsed && parsed.splice) { appState.offlineQueue = parsed; }
+        } catch (e) {
+          appState.offlineQueue = [];
+        } finally { updateOfflineBadge(); }
+      }
+      function saveOfflineQueue() {
+        try {
+          if (!window.localStorage) { return; }
+          var json = JSON.stringify(appState.offlineQueue || []);
+          localStorage.setItem(OFFLINE_QUEUE_KEY, json);
+        } catch (e) { }
+      }
+      function enqueueOfflineEntry(payload) {
+        var entry = {
+          barcode: payload.barcode,
+          room: payload.room,
+          notes: payload.notes || '',
+          imageDataUrl: payload.imageDataUrl || '',
+          createdAt: new Date().toISOString()
+        };
+        if (!appState.offlineQueue) { appState.offlineQueue = []; }
+        if (appState.offlineQueue.length >= 50) { appState.offlineQueue.shift(); }
+        appState.offlineQueue.push(entry);
+        saveOfflineQueue();
+        updateOfflineBadge();
+      }
+      function updateOfflineBadge() {
+        var count = (appState.offlineQueue && appState.offlineQueue.length) ? appState.offlineQueue.length : 0;
+        if (count > 0) {
+          dom.offlineBadge.classList.remove('hidden');
+          dom.offlineBadgeCount.textContent = String(count);
+        } else {
+          dom.offlineBadge.classList.add('hidden');
+          dom.offlineBadgeCount.textContent = '0';
+        }
+      }
+      function syncOfflineQueue() {
+        if (!hasServer() || !ensureAuth()) {
+          showToast('Cannot sync queued items without API access.', 'error');
+          return;
+        }
+        if (!appState.offlineQueue || !appState.offlineQueue.length) {
+          showToast('No queued items to sync.', 'info');
+          return;
+        }
+        var items = appState.offlineQueue.slice(0);
+        var remaining = [];
+        var index = 0;
+        var successCount = 0;
+        showToast('Syncing ' + items.length + ' queued item(s)…', 'info');
+        function processNext() {
+          if (index >= items.length) {
+            appState.offlineQueue = remaining;
+            saveOfflineQueue();
+            updateOfflineBadge();
+            if (successCount > 0) {
+              showToast('Synced ' + successCount + ' item(s).', 'success');
+              refreshEntriesFromServer();
+            }
+            return;
+          }
+          var item = items[index];
+          index++;
+          callApi('saveEntry', appState.authToken, item)
+            .then(function () {
+              successCount++;
+              processNext();
+            })
+            .catch(function (err) {
+              console.log('Failed to sync queued item:', err);
+              remaining.push(item);
+              processNext();
+            });
+        }
+        processNext();
+      }
+
+      /* Data loading */
+      function populateRooms(rooms) {
+        appState.rooms = rooms || [];
+        dom.selectRoom.innerHTML = '';
+        var opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'Choose room…';
+        dom.selectRoom.appendChild(opt);
+        for (var i = 0; i < appState.rooms.length; i++) {
+          var room = appState.rooms[i];
+          var o = document.createElement('option');
+          o.value = room;
+          o.textContent = room;
+          dom.selectRoom.appendChild(o);
+        }
+      }
+      function handleInitialData(data) {
+        data = data || {};
+        appState.userEmail = data.userEmail || '';
+        appState.isAdmin = !!data.isAdmin;
+        appState.entries = data.entries || [];
+        appState.filterText = '';
+        appState.editingEntryId = null;
+
+        populateRooms(data.rooms || []);
+        updateUserBadge();
+        updateAdminUI();
+        applyFilterAndRender();
+      }
+      function handleInitialDataError(err) {
+        console.log('getInitialData error:', err);
+        showToast('Error loading initial data.', 'error');
+        setAuthToken('');
+        showAuthScreen(true);
+      }
+      function loadInitialDataFromServer() {
+        if (!hasServer() || !ensureAuth()) { return; }
+        callApi('getInitialData', appState.authToken, {})
+          .then(handleInitialData)
+          .catch(handleInitialDataError);
+      }
+      function refreshEntriesFromServer() {
+        if (!hasServer() || !ensureAuth()) {
+          showToast('Cannot refresh entries without API access.', 'error');
+          return;
+        }
+        callApi('listEntries', appState.authToken, {})
+          .then(function (entries) {
+            if (entries && entries.splice) { appState.entries = entries; }
+            else if (entries && entries.entries && entries.entries.splice) { appState.entries = entries.entries; }
+            applyFilterAndRender();
+            showToast('Entries refreshed.', 'success');
+          })
+          .catch(function (err) {
+            console.log('listEntries error:', err);
+            showToast('Could not refresh entries.', 'error');
+          });
+      }
+      function updateUserBadge() {
+        if (appState.userEmail) {
+          dom.userBadge.textContent = appState.userEmail;
+          dom.userBadge.title = appState.userEmail;
+          if (dom.btnSignOut) { dom.btnSignOut.classList.remove('hidden'); }
+        } else {
+          dom.userBadge.textContent = '';
+          dom.userBadge.title = '';
+          if (dom.btnSignOut) { dom.btnSignOut.classList.add('hidden'); }
+        }
+      }
+      function updateAdminUI() {
+        if (appState.isAdmin) {
+          dom.adminBar.style.display = 'flex';
+        } else {
+          dom.adminBar.style.display = 'none';
+          appState.adminMode = false;
+          if (dom.adminModeToggle) { dom.adminModeToggle.checked = false; }
+        }
+      }
+
+      /* Entries rendering */
+      function applyFilterAndRender() {
+        var entries = appState.entries || [];
+        var term = (appState.filterText || '').toLowerCase();
+        if (!term) {
+          appState.filteredEntries = entries.slice(0);
+        } else {
+          var filtered = [];
+          for (var i = 0; i < entries.length; i++) {
+            var e = entries[i];
+            var barcode = (e.barcode || '').toString().toLowerCase();
+            var room = (e.room || '').toString().toLowerCase();
+            var notes = (e.notes || '').toString().toLowerCase();
+            if (barcode.indexOf(term) > -1 || room.indexOf(term) > -1 || notes.indexOf(term) > -1) {
+              filtered.push(e);
+            }
+          }
+          appState.filteredEntries = filtered;
+        }
+        renderEntries();
+      }
+
+      function renderEntries() {
+        dom.entriesList.innerHTML = '';
+        var entries = appState.filteredEntries || [];
+        var total = (appState.entries && appState.entries.length) ? appState.entries.length : 0;
+        if (!entries.length) {
+          var empty = document.createElement('div');
+          empty.className = 'muted';
+          empty.textContent = total ? 'No results for this search.' : 'No entries yet.';
+          dom.entriesList.appendChild(empty);
+          return;
+        }
+        for (var i = 0; i < entries.length; i++) {
+          var entry = entries[i];
+          var card = document.createElement('article');
+          card.className = 'entry-card';
+          card.setAttribute('data-entry-id', entry.id || '');
+          if (appState.isAdmin && appState.adminMode && appState.editingEntryId === entry.id) {
+            buildEntryEditContent(card, entry);
+          } else {
+            buildEntryDisplayContent(card, entry);
+          }
+          dom.entriesList.appendChild(card);
+        }
+      }
+
+      function buildEntryDisplayContent(card, entry) {
+        var rowMain = document.createElement('div');
+        rowMain.className = 'entry-row-main';
+        var barcodeEl = document.createElement('div');
+        barcodeEl.className = 'entry-barcode';
+        barcodeEl.textContent = entry.barcode || '(no barcode)';
+        rowMain.appendChild(barcodeEl);
+        var roomBadge = document.createElement('div');
+        roomBadge.className = 'entry-room-badge';
+        roomBadge.textContent = entry.room || '—';
+        rowMain.appendChild(roomBadge);
+        card.appendChild(rowMain);
+
+        var meta = document.createElement('div');
+        meta.className = 'entry-meta';
+        var tsSpan = document.createElement('span');
+        tsSpan.textContent = entry.timestamp || '';
+        meta.appendChild(tsSpan);
+        if (entry.userEmail) {
+          var userSpan = document.createElement('span');
+          userSpan.textContent = '• ' + entry.userEmail;
+          meta.appendChild(userSpan);
+        }
+        if (entry.imageUrl) {
+          var imgSpan = document.createElement('span');
+          imgSpan.textContent = '• 📷 image';
+          meta.appendChild(imgSpan);
+        }
+        card.appendChild(meta);
+        if (entry.notes) {
+          var notesP = document.createElement('div');
+          notesP.className = 'entry-notes';
+          notesP.textContent = entry.notes;
+          card.appendChild(notesP);
+        }
+        if (appState.isAdmin && appState.adminMode) {
+          var actions = document.createElement('div');
+          actions.className = 'entry-actions';
+          var editBtn = document.createElement('button');
+          editBtn.type = 'button';
+          editBtn.className = 'btn btn-ghost';
+          editBtn.setAttribute('data-action', 'edit');
+          editBtn.setAttribute('data-id', entry.id || '');
+          editBtn.textContent = 'Edit';
+          actions.appendChild(editBtn);
+          var delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'btn btn-danger';
+          delBtn.setAttribute('data-action', 'delete');
+          delBtn.setAttribute('data-id', entry.id || '');
+          delBtn.textContent = 'Delete';
+          actions.appendChild(delBtn);
+          card.appendChild(actions);
+        }
+      }
+
+      function buildEntryEditContent(card, entry) {
+        var infoRow = document.createElement('div');
+        infoRow.className = 'entry-row-main';
+        var label = document.createElement('div');
+        label.className = 'entry-barcode';
+        label.textContent = 'Editing ' + (entry.barcode || '(no barcode)');
+        infoRow.appendChild(label);
+        card.appendChild(infoRow);
+
+        var roomField = document.createElement('div');
+        roomField.className = 'field';
+        var roomSelect = document.createElement('select');
+        roomSelect.setAttribute('data-edit-room-for', entry.id || '');
+        for (var i = 0; i < appState.rooms.length; i++) {
+          var r = appState.rooms[i];
+          var opt = document.createElement('option');
+          opt.value = r;
+          opt.textContent = r;
+          if (r === entry.room) { opt.selected = true; }
+          roomSelect.appendChild(opt);
+        }
+        roomField.appendChild(roomSelect);
+        card.appendChild(roomField);
+
+        var notesArea = document.createElement('textarea');
+        notesArea.setAttribute('data-edit-notes-for', entry.id || '');
+        notesArea.rows = 2;
+        notesArea.value = entry.notes || '';
+        card.appendChild(notesArea);
+
+        var actions = document.createElement('div');
+        actions.className = 'entry-actions';
+        var saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'btn btn-primary';
+        saveBtn.setAttribute('data-action', 'saveEdit');
+        saveBtn.setAttribute('data-id', entry.id || '');
+        saveBtn.textContent = 'Save';
+        actions.appendChild(saveBtn);
+        var cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn btn-ghost';
+        cancelBtn.setAttribute('data-action', 'cancelEdit');
+        cancelBtn.setAttribute('data-id', entry.id || '');
+        cancelBtn.textContent = 'Cancel';
+        actions.appendChild(cancelBtn);
+        card.appendChild(actions);
+      }
+
+      function handleEntriesListClick(evt) {
+        var target = evt.target || evt.srcElement;
+        var actionEl = findAncestorWithAttr(target, 'data-action');
+        if (!actionEl) { return; }
+        var action = actionEl.getAttribute('data-action');
+        var id = actionEl.getAttribute('data-id');
+        if (!id) { return; }
+        if (action === 'edit') {
+          if (!appState.isAdmin) { return; }
+          appState.editingEntryId = id;
+          renderEntries();
+        } else if (action === 'cancelEdit') {
+          appState.editingEntryId = null;
+          renderEntries();
+        } else if (action === 'saveEdit') {
+          if (!appState.isAdmin) { return; }
+          saveEditedEntry(id);
+        } else if (action === 'delete') {
+          if (!appState.isAdmin) { return; }
+          confirmDeleteEntry(id);
+        }
+      }
+
+      function findAncestorWithAttr(el, attrName) {
+        while (el && el !== document.documentElement) {
+          if (el.hasAttribute && el.hasAttribute(attrName)) { return el; }
+          el = el.parentNode;
+        }
+        return null;
+      }
+
+      function saveEditedEntry(entryId) {
+        if (!hasServer() || !ensureAuth()) {
+          showToast('Cannot update entries without API access.', 'error');
+          return;
+        }
+
+        var roomSelect = document.querySelector('select[data-edit-room-for="' + entryId + '"]');
+        var notesArea = document.querySelector('textarea[data-edit-notes-for="' + entryId + '"]');
+        var newRoom = roomSelect ? (roomSelect.value || '').toString().trim() : '';
+        var newNotes = notesArea ? (notesArea.value || '').toString() : '';
+        var payload = { id: entryId, room: newRoom, notes: newNotes };
+
+        callApi('updateEntry', appState.authToken, payload)
+          .then(function (updatedEntry) {
+            var entries = appState.entries || [];
+            for (var i = 0; i < entries.length; i++) {
+              if (entries[i].id === entryId) { entries[i] = updatedEntry; break; }
+            }
+            appState.editingEntryId = null;
+            applyFilterAndRender();
+            showToast('Entry updated.', 'success');
+          })
+          .catch(function (err) {
+            showToast('Could not update entry: ' + (err && err.message ? err.message : ''), 'error');
+          });
+      }
+
+      function confirmDeleteEntry(entryId) {
+        var sure = window.confirm ? window.confirm('Delete this entry?') : true;
+        if (!sure) { return; }
+        if (!hasServer() || !ensureAuth()) {
+          showToast('Cannot delete entries without API access.', 'error');
+          return;
+        }
+        callApi('deleteEntry', appState.authToken, { id: entryId })
+          .then(function () {
+            var entries = appState.entries || [];
+            var remaining = [];
+            for (var i = 0; i < entries.length; i++) {
+              if (entries[i].id !== entryId) { remaining.push(entries[i]); }
+            }
+            appState.entries = remaining;
+            appState.editingEntryId = null;
+            applyFilterAndRender();
+            showToast('Entry deleted.', 'success');
+          })
+          .catch(function (err) {
+            showToast('Could not delete entry: ' + (err && err.message ? err.message : ''), 'error');
+          });
+      }
+
+      /* Toasts */
+      function showToast(message, type) {
+        if (!dom.toastContainer) { return; }
+        var toast = document.createElement('div');
+        var cls = 'toast';
+        if (type === 'success') { cls += ' toast-success'; }
+        else if (type === 'error') { cls += ' toast-error'; }
+        else { cls += ' toast-info'; }
+        toast.className = cls;
+        toast.textContent = message;
+        dom.toastContainer.appendChild(toast);
+        setTimeout(function () {
+          toast.classList.add('toast-hide');
+          setTimeout(function () {
+            if (toast.parentNode) { toast.parentNode.removeChild(toast); }
+          }, 260);
+        }, 2600);
+      }
+
+      /* Init */
+      function initApp() {
+        cacheDom();
+        bindEvents();
+        initConfig();
+        handleLayoutChange();
+        initScannerSupport();
+        loadOfflineQueue();
+        updateOfflineBadge();
+        switchTab('scan');
+        initAuth();
+      }
+
+      if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', initApp); }
+      else { initApp(); }
+    })();
+  </script>
+</body>
+</html>
