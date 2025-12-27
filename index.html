@@ -1169,9 +1169,10 @@
               syncOfflineQueue();
             }
           })
-          .catch(function () {
+          .catch(function (err) {
             setAuthToken('');
-            showAuthError('Sign-in failed. Please sign in again.');
+            var msg = (err && err.message) ? err.message : 'Sign-in failed. Please sign in again.';
+            showAuthError(msg);
             showAuthScreen(true);
           });
       }
@@ -1195,7 +1196,16 @@
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: body
         })
-          .then(function (res) { return res.json(); })
+          .then(function (res) {
+            var contentType = res.headers.get('content-type') || '';
+            if (contentType.indexOf('application/json') === -1) {
+              return res.text().then(function (text) {
+                var snippet = (text || '').replace(/\s+/g, ' ').slice(0, 180);
+                throw new Error('API response is not JSON. Check Web App access. ' + snippet);
+              });
+            }
+            return res.json();
+          })
           .then(function (json) {
             if (!json || json.ok !== true) {
               throw new Error(json && json.error ? json.error : 'API error');
