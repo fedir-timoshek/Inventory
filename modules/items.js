@@ -69,5 +69,8 @@ export function saveCurrentItem() {
       dom.btnSaveItem.textContent = '💾 Save item';
       enqueueOfflineEntry(payload);
       showToast('Saved locally; will sync when back online.', 'info');
+      dom.inputBarcode.value = '';
+      dom.inputNotes.value = '';
+      clearSelectedImage();
     });
 }

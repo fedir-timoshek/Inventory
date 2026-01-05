@@ -373,9 +373,8 @@ textarea {
 .btn-danger { background: #fff1f2; color: #b91c1c; border-color: rgba(220, 38, 38, 0.3); }
 
 .actions-bar {
-  position: sticky;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
-  z-index: 20;
+  position: relative;
+  margin-top: auto;
   background: rgba(255, 255, 255, 0.96);
   border-radius: 16px;
   padding: 10px;
