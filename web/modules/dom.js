@@ -23,7 +23,6 @@ export function cacheDom() {
   dom.cameraSelectRow = $('cameraSelectRow');
   dom.cameraSelect = $('cameraSelect');
   dom.continuousToggle = $('continuousToggle');
-  dom.btnStartScan = $('btnStartScan');
   dom.btnStopScan = $('btnStopScan');
   dom.torchRow = $('torchRow');
   dom.btnToggleTorch = $('btnToggleTorch');

@@ -8,14 +8,14 @@ export function initScannerSupport() {
   if (!appState.cameraSupported) {
     setScanStatus('Camera scanning is not supported.', 'Idle');
     dom.cameraSupportMessage.classList.remove('hidden');
-    dom.btnStartScan.disabled = true;
-    dom.btnStopScan.disabled = true;
     if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
+    updateScanButton();
+    updateTorchUI();
     return;
   }
   dom.cameraSupportMessage.classList.add('hidden');
-  dom.btnStartScan.disabled = false;
-  dom.btnStopScan.disabled = false;
+  updateScanButton();
+  updateTorchUI();
 
   try {
     if (window.ZXing && ZXing.BrowserMultiFormatReader && typeof Promise !== 'undefined') {
@@ -96,7 +96,7 @@ export function startScanner() {
   appState.torchSupported = false;
   appState.torchOn = false;
   updateTorchUI();
-  updateScanButtons(true);
+  updateScanButton();
   setScanStatus('Requesting camera…', 'Scanning');
 
   var deviceId = appState.selectedCameraId || undefined;
@@ -111,7 +111,7 @@ export function startScanner() {
     if (startPromise && typeof startPromise.catch === 'function') {
       startPromise.catch(function (err) {
         appState.scanning = false;
-        updateScanButtons(false);
+        updateScanButton();
         setScanStatus('Camera error: ' + (err && err.message ? err.message : ''), 'Error');
         showToast('Could not start camera. Check permissions.', 'error');
       });
@@ -120,7 +120,7 @@ export function startScanner() {
     scheduleTorchCheck();
   } catch (e) {
     appState.scanning = false;
-    updateScanButtons(false);
+    updateScanButton();
     setScanStatus('Camera error: ' + (e && e.message ? e.message : ''), 'Error');
     showToast('Could not start camera.', 'error');
   }
@@ -132,7 +132,7 @@ export function stopScanner() {
   appState.torchSupported = false;
   appState.torchOn = false;
   updateTorchUI();
-  updateScanButtons(false);
+  updateScanButton();
   try {
     if (scannerState.codeReader && typeof scannerState.codeReader.reset === 'function') {
       scannerState.codeReader.reset();
@@ -194,10 +194,19 @@ function refreshTorchSupport(track) {
 
 function updateTorchUI() {
   if (!dom.torchRow || !dom.btnToggleTorch || !dom.torchHint) { return; }
-  var shouldShow = appState.scanning;
-  dom.torchRow.classList.toggle('hidden', !shouldShow);
-  dom.btnToggleTorch.disabled = !appState.torchSupported;
+  if (!appState.cameraSupported) {
+    dom.btnToggleTorch.disabled = true;
+    dom.btnToggleTorch.textContent = '🔦 Flashlight';
+    dom.torchHint.textContent = 'Not supported';
+    return;
+  }
+  var isScanning = appState.scanning;
+  dom.btnToggleTorch.disabled = !appState.torchSupported || !isScanning;
   dom.btnToggleTorch.textContent = appState.torchOn ? '🔦 Flashlight on' : '🔦 Flashlight';
+  if (!isScanning) {
+    dom.torchHint.textContent = 'Camera off';
+    return;
+  }
   dom.torchHint.textContent = appState.torchSupported ? (appState.torchOn ? 'On' : 'Off') : 'Not supported';
 }
 
@@ -244,9 +253,15 @@ function setScanStatus(text, badge) {
   if (dom.scanStatusBadge) { dom.scanStatusBadge.textContent = badge || 'Status'; }
 }
 
-function updateScanButtons(isScanning) {
-  dom.btnStartScan.disabled = !!isScanning;
-  dom.btnStopScan.disabled = !isScanning;
+function updateScanButton() {
+  if (!dom.btnStopScan) { return; }
+  if (!appState.cameraSupported) {
+    dom.btnStopScan.disabled = true;
+    dom.btnStopScan.textContent = 'Camera unavailable';
+    return;
+  }
+  dom.btnStopScan.disabled = false;
+  dom.btnStopScan.textContent = appState.scanning ? '■ Stop' : '▶ Resume';
 }
 
 function flashScannerSuccess() {

@@ -32,8 +32,13 @@ function bindEvents() {
     dom.btnSignOut.onclick = function () { handleSignOut(); };
   }
 
-  dom.btnStartScan.onclick = startScanner;
-  dom.btnStopScan.onclick = stopScanner;
+  dom.btnStopScan.onclick = function () {
+    if (appState.scanning) {
+      stopScanner();
+    } else {
+      startScanner();
+    }
+  };
   dom.btnToggleTorch.onclick = function () { toggleTorch(); };
   dom.continuousToggle.onchange = function () {
     appState.continuousScanning = !!dom.continuousToggle.checked;
