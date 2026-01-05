@@ -41,6 +41,7 @@ This repo hosts the frontend on GitHub Pages and calls a Google Apps Script web 
 - `npm install`
 - `npm run build` to generate `web/dist` with minified JS/CSS
 - The build rewrites `web/dist/index.html` to use bundled `app.min.js` and `styles.min.css`
+- If you add a `package-lock.json`, you can switch the workflow to `npm ci` and enable npm caching
 
 ## Alternative: deploy from branch
 GitHub Pages only allows `/(root)` or `/docs` for branch deployments. If you prefer that approach, move the contents of `web/` into `/docs` or the repo root.
