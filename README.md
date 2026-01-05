@@ -31,9 +31,10 @@ This repo hosts the frontend on GitHub Pages and calls a Google Apps Script web 
   - `https://<your-username>.github.io`
   - (add custom domain if you use one)
 
-4) Enable GitHub Pages
+4) Enable GitHub Pages (recommended)
 - GitHub repo -> Settings -> Pages
-- Deploy from branch -> `main` -> `/web` (source) or `/web/dist` (after build)
+- Source: **GitHub Actions**
+- The workflow builds and deploys `web/dist` on every push to `main`
 
 ## Build (optional, minified assets)
 - Requires Node.js 16+
@@ -41,9 +42,12 @@ This repo hosts the frontend on GitHub Pages and calls a Google Apps Script web 
 - `npm run build` to generate `web/dist` with minified JS/CSS
 - The build rewrites `web/dist/index.html` to use bundled `app.min.js` and `styles.min.css`
 
+## Alternative: deploy from branch
+GitHub Pages only allows `/(root)` or `/docs` for branch deployments. If you prefer that approach, move the contents of `web/` into `/docs` or the repo root.
+
 ## Copy checklist
 - Apps Script: copy `appscript/code.gs` into your Apps Script project.
-- GitHub: commit and deploy `web/` (source) or `web/dist/` after `npm run build`.
+- GitHub: commit and deploy via GitHub Actions (workflow publishes `web/dist`).
 
 ## Notes
 - The API validates Google ID tokens server-side.
