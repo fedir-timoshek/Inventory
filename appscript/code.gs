@@ -34,10 +34,11 @@ const COL = {
   TIMESTAMP: 2,
   BARCODE: 3,
   ROOM: 4,
-  NOTES: 5,
-  IMAGE_URL: 6,
-  USER_EMAIL: 7,
-  DELETED: 8     // TRUE/FALSE for soft delete
+  QUANTITY: 5,
+  NOTES: 6,
+  IMAGE_URL: 7,
+  USER_EMAIL: 8,
+  DELETED: 9     // TRUE/FALSE for soft delete
 };
 
 
@@ -75,7 +76,7 @@ function getInitialData(idToken) {
   var userEmail = getUserEmailFromToken_(idToken);
   var isAdmin = isAdmin_(userEmail);
   var rooms = getRooms_();
-  var entries = listEntries_(RECENT_ENTRIES_LIMIT);
+  var entries = isAdmin ? listEntries_(RECENT_ENTRIES_LIMIT) : listEntries_(RECENT_ENTRIES_LIMIT, userEmail);
 
   return {
     userEmail: userEmail,
@@ -109,7 +110,7 @@ function handleApiAction_(action, token, payload) {
 
 /**
  * Saves a new inventory entry from the form.
- * formData = { barcode, room, notes, imageDataUrl }
+ * formData = { barcode, room, notes, quantity, imageDataUrl }
  */
 function saveEntry(idToken, formData) {
   var userEmail = getUserEmailFromToken_(idToken);
@@ -118,6 +119,10 @@ function saveEntry(idToken, formData) {
   var barcode = (formData && formData.barcode || '').toString().trim();
   var room = (formData && formData.room || '').toString().trim();
   var notes = (formData && formData.notes || '').toString();
+  var quantity = parseInt(formData && formData.quantity, 10);
+  if (!quantity || quantity < 1) {
+    quantity = 1;
+  }
 
   if (!barcode) {
     throw new Error('Barcode is required.');
@@ -139,6 +144,7 @@ function saveEntry(idToken, formData) {
     now,
     barcode,
     room,
+    quantity,
     notes,
     imageUrl,
     userEmail,
@@ -157,14 +163,15 @@ function saveEntry(idToken, formData) {
  * Returns a list of recent entries (optionally limited).
  */
 function listEntries(idToken, limit) {
-  getUserEmailFromToken_(idToken);
+  var userEmail = getUserEmailFromToken_(idToken);
+  var isAdmin = isAdmin_(userEmail);
   limit = limit || RECENT_ENTRIES_LIMIT;
-  return listEntries_(limit);
+  return isAdmin ? listEntries_(limit) : listEntries_(limit, userEmail);
 }
 
 /**
  * Updates an existing entry (admin only).
- * entryData = { id, room, notes }
+ * entryData = { id, room, notes, quantity }
  */
 function updateEntry(idToken, entryData) {
   var userEmail = getUserEmailFromToken_(idToken);
@@ -183,7 +190,7 @@ function updateEntry(idToken, entryData) {
     throw new Error('Entry not found.');
   }
 
-  var lastCol = sheet.getLastColumn();
+  var lastCol = Math.max(sheet.getLastColumn(), COL.DELETED);
   var rowRange = sheet.getRange(rowIndex, 1, 1, lastCol);
   var rowValues = rowRange.getValues()[0];
 
@@ -195,6 +202,11 @@ function updateEntry(idToken, entryData) {
   }
   if (entryData.notes !== undefined) {
     rowValues[COL.NOTES - 1] = entryData.notes;
+  }
+  if (entryData.quantity !== undefined) {
+    var qty = parseInt(entryData.quantity, 10);
+    if (!qty || qty < 1) { qty = 1; }
+    rowValues[COL.QUANTITY - 1] = qty;
   }
   rowValues[COL.TIMESTAMP - 1] = now; // update timestamp on change
 
@@ -320,9 +332,9 @@ function getRooms_() {
 
 /**
  * Internal function that reads recent entries from Inventory,
- * skipping soft-deleted rows.
+ * skipping soft-deleted rows. Optionally filters by user email.
  */
-function listEntries_(limit) {
+function listEntries_(limit, userEmailFilter) {
   var sheet = getSheetByName_(INVENTORY_SHEET_NAME);
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) {
@@ -345,6 +357,12 @@ function listEntries_(limit) {
       continue;
     }
     var entryObj = rowToEntryObject_(row);
+    if (userEmailFilter) {
+      var entryEmail = (entryObj.userEmail || '').toString().toLowerCase();
+      if (entryEmail !== userEmailFilter.toLowerCase()) {
+        continue;
+      }
+    }
     entries.push(entryObj);
     if (entries.length >= limit) {
       break;
@@ -357,6 +375,8 @@ function listEntries_(limit) {
  * Converts a sheet row array into a JS object that the client expects.
  */
 function rowToEntryObject_(row) {
+  var qty = parseInt(row[COL.QUANTITY - 1], 10);
+  if (!qty || qty < 1) { qty = 1; }
   return {
     id: row[COL.ID - 1] || '',
     timestamp: formatDate_(row[COL.TIMESTAMP - 1]),
@@ -364,7 +384,8 @@ function rowToEntryObject_(row) {
     room: row[COL.ROOM - 1] || '',
     notes: row[COL.NOTES - 1] || '',
     imageUrl: row[COL.IMAGE_URL - 1] || '',
-    userEmail: row[COL.USER_EMAIL - 1] || ''
+    userEmail: row[COL.USER_EMAIL - 1] || '',
+    quantity: qty
   };
 }
 

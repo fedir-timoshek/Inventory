@@ -21,7 +21,7 @@ import {
   updateAdminUI,
   setAdminMode
 } from './modules/entries.js';
-import { saveCurrentItem, clearForm } from './modules/items.js';
+import { saveCurrentItem, clearForm, adjustQuantity, setQuantityValue } from './modules/items.js';
 import { handleLayoutChange } from './modules/layout.js';
 import { debounce } from './modules/utils.js';
 
@@ -87,6 +87,16 @@ function bindEvents() {
   dom.takePhotoInput.onchange = handleImageFileChange;
   dom.choosePhotoInput.onchange = handleImageFileChange;
   dom.removeImageButton.onclick = function () { clearSelectedImage(); };
+
+  if (dom.btnQtyMinus) {
+    dom.btnQtyMinus.onclick = function () { adjustQuantity(-1); };
+  }
+  if (dom.btnQtyPlus) {
+    dom.btnQtyPlus.onclick = function () { adjustQuantity(1); };
+  }
+  if (dom.inputQuantity) {
+    dom.inputQuantity.onchange = function () { setQuantityValue(dom.inputQuantity.value); };
+  }
 
   dom.btnSyncScan.onclick = function () { syncOfflineQueue(); };
   dom.btnSyncEntries.onclick = function () { syncOfflineQueue(); };

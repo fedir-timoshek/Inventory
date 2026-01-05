@@ -337,6 +337,15 @@ textarea {
 .field-row .grow { flex: 1 1 220px; }
 .field-row .shrink { flex: 0 0 auto; }
 
+.quantity-row {
+  align-items: center;
+}
+
+.quantity-input {
+  text-align: center;
+  max-width: 160px;
+}
+
 /* Buttons */
 .btn {
   border: 1.5px solid var(--border-strong);
@@ -867,6 +876,7 @@ video#videoPreview {
   .field-row .grow, .field-row .shrink, .actions-grid > * { width: 100%; }
   .actions-grid { grid-template-columns: 1fr; }
   .card { padding-bottom: 18px; }
+  .quantity-input { max-width: 100%; }
 }
 
 @media (max-width: 600px) {

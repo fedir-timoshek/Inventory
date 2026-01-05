@@ -22,6 +22,10 @@ export function loadOfflineQueue() {
           parsed[i].localId = buildLocalId(parsed[i], i);
           needsSave = true;
         }
+        if (parsed[i].quantity === undefined || parsed[i].quantity === null || parsed[i].quantity === '') {
+          parsed[i].quantity = 1;
+          needsSave = true;
+        }
       }
       appState.offlineQueue = parsed;
       if (needsSave) { saveOfflineQueue(); }
@@ -40,6 +44,7 @@ export function enqueueOfflineEntry(payload) {
     barcode: payload.barcode,
     room: payload.room,
     notes: payload.notes || '',
+    quantity: payload.quantity || 1,
     imageDataUrl: payload.imageDataUrl || '',
     createdAt: createdAt
   };

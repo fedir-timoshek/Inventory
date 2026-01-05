@@ -65,9 +65,6 @@
       <!-- Scan Screen -->
       <main id="screenScan" class="screen screen-active" role="tabpanel" aria-labelledby="tabScan">
         <section class="card">
-          <div class="section-title">Quick capture</div>
-          <div class="section-sub">Large, touch-friendly controls. Open tools in sheets.</div>
-
           <form id="itemForm" class="stack" novalidate>
             <div class="field">
               <label for="inputBarcode">Barcode</label>
@@ -105,6 +102,15 @@
               </div>
               <input id="takePhotoInput" type="file" accept="image/*" capture="environment" class="hidden">
               <input id="choosePhotoInput" type="file" accept="image/*" class="hidden">
+            </div>
+
+            <div class="field">
+              <label for="inputQuantity">Quantity</label>
+              <div class="field-row quantity-row">
+                <button id="btnQtyMinus" type="button" class="btn btn-ghost shrink">-</button>
+                <input id="inputQuantity" type="number" min="1" step="1" value="1" inputmode="numeric" class="pill-input quantity-input" aria-label="Quantity">
+                <button id="btnQtyPlus" type="button" class="btn btn-ghost shrink">+</button>
+              </div>
             </div>
 
             <div class="field">

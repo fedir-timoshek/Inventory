@@ -11,10 +11,28 @@ import { triggerVibrate } from './utils.js';
 export function clearForm() {
   dom.inputBarcode.value = '';
   dom.inputNotes.value = '';
+  setQuantityValue(1);
   dom.selectRoom.value = '';
   dom.roomDisplay.textContent = 'Select a room';
   clearSelectedImage();
   dom.inputBarcode.focus();
+}
+
+export function adjustQuantity(delta) {
+  return setQuantityValue(getQuantityValue() + delta);
+}
+
+export function setQuantityValue(value) {
+  if (!dom.inputQuantity) { return 1; }
+  var next = parseInt(value, 10);
+  if (!next || next < 1) { next = 1; }
+  dom.inputQuantity.value = String(next);
+  return next;
+}
+
+function getQuantityValue() {
+  if (!dom.inputQuantity) { return 1; }
+  return setQuantityValue(dom.inputQuantity.value);
 }
 
 export function saveCurrentItem() {
@@ -22,6 +40,7 @@ export function saveCurrentItem() {
   var barcode = (dom.inputBarcode.value || '').toString().trim();
   var room = (dom.selectRoom.value || '').toString().trim();
   var notes = (dom.inputNotes.value || '').toString().trim();
+  var quantity = getQuantityValue();
 
   if (!barcode) {
     showToast('Please scan or type a barcode.', 'error');
@@ -40,6 +59,7 @@ export function saveCurrentItem() {
     barcode: barcode,
     room: room,
     notes: notes,
+    quantity: quantity,
     imageDataUrl: appState.selectedImageDataUrl || ''
   };
   if (!hasServer()) {
@@ -62,6 +82,7 @@ export function saveCurrentItem() {
       }
       dom.inputBarcode.value = '';
       dom.inputNotes.value = '';
+      setQuantityValue(1);
       clearSelectedImage();
     })
     .catch(function () {
@@ -71,6 +92,7 @@ export function saveCurrentItem() {
       showToast('Saved locally; will sync when back online.', 'info');
       dom.inputBarcode.value = '';
       dom.inputNotes.value = '';
+      setQuantityValue(1);
       clearSelectedImage();
     });
 }

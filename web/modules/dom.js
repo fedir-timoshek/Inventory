@@ -37,6 +37,9 @@ export function cacheDom() {
   dom.roomDisplay = $('roomDisplay');
   dom.btnOpenRoomSheet = $('btnOpenRoomSheet');
   dom.inputNotes = $('inputNotes');
+  dom.inputQuantity = $('inputQuantity');
+  dom.btnQtyMinus = $('btnQtyMinus');
+  dom.btnQtyPlus = $('btnQtyPlus');
 
   dom.takePhotoButton = $('takePhotoButton');
   dom.choosePhotoButton = $('choosePhotoButton');

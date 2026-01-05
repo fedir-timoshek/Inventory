@@ -18,17 +18,31 @@ export function setAdminMode(enabled) {
 
 export function applyFilterAndRender() {
   var entries = appState.entries || [];
+  var visible = [];
+  if (appState.isAdmin || !appState.userEmail) {
+    visible = entries.slice(0);
+  } else {
+    var targetEmail = appState.userEmail.toLowerCase();
+    for (var v = 0; v < entries.length; v++) {
+      var entry = entries[v];
+      var entryEmail = (entry.userEmail || '').toString().toLowerCase();
+      if (entryEmail === targetEmail) {
+        visible.push(entry);
+      }
+    }
+  }
   var term = (appState.filterText || '').toLowerCase();
   if (!term) {
-    appState.filteredEntries = entries.slice(0);
+    appState.filteredEntries = visible.slice(0);
   } else {
     var filtered = [];
-    for (var i = 0; i < entries.length; i++) {
-      var e = entries[i];
+    for (var i = 0; i < visible.length; i++) {
+      var e = visible[i];
       var barcode = (e.barcode || '').toString().toLowerCase();
       var room = (e.room || '').toString().toLowerCase();
       var notes = (e.notes || '').toString().toLowerCase();
-      if (barcode.indexOf(term) > -1 || room.indexOf(term) > -1 || notes.indexOf(term) > -1) {
+      var quantity = (e.quantity !== undefined && e.quantity !== null) ? String(e.quantity).toLowerCase() : '';
+      if (barcode.indexOf(term) > -1 || room.indexOf(term) > -1 || notes.indexOf(term) > -1 || quantity.indexOf(term) > -1) {
         filtered.push(e);
       }
     }
@@ -91,11 +105,11 @@ export function handleEntriesListClick(evt) {
 function renderEntries() {
   dom.entriesList.innerHTML = '';
   var entries = appState.filteredEntries || [];
-  var total = (appState.entries && appState.entries.length) ? appState.entries.length : 0;
+  var hasFilter = !!(appState.filterText && appState.filterText.trim());
   if (!entries.length) {
     var empty = document.createElement('div');
     empty.className = 'muted';
-    empty.textContent = total ? 'No results for this search.' : 'No entries yet.';
+    empty.textContent = hasFilter ? 'No results for this search.' : 'No entries yet.';
     dom.entriesList.appendChild(empty);
     return;
   }
@@ -131,6 +145,11 @@ function buildEntryDisplayContent(card, entry) {
   var tsSpan = document.createElement('span');
   tsSpan.textContent = entry.timestamp || '';
   meta.appendChild(tsSpan);
+  var qtyValue = parseInt(entry.quantity, 10);
+  if (!qtyValue || qtyValue < 1) { qtyValue = 1; }
+  var qtySpan = document.createElement('span');
+  qtySpan.textContent = '• Qty: ' + qtyValue;
+  meta.appendChild(qtySpan);
   if (entry.userEmail) {
     var userSpan = document.createElement('span');
     userSpan.textContent = '• ' + entry.userEmail;
@@ -193,6 +212,26 @@ function buildEntryEditContent(card, entry) {
   roomField.appendChild(roomSelect);
   card.appendChild(roomField);
 
+  var qtyField = document.createElement('div');
+  qtyField.className = 'field';
+  var qtyLabel = document.createElement('label');
+  var qtyId = 'edit-qty-' + (entry.id || 'row');
+  qtyLabel.setAttribute('for', qtyId);
+  qtyLabel.textContent = 'Quantity';
+  qtyField.appendChild(qtyLabel);
+  var qtyInput = document.createElement('input');
+  qtyInput.type = 'number';
+  qtyInput.min = '1';
+  qtyInput.step = '1';
+  qtyInput.className = 'pill-input';
+  qtyInput.id = qtyId;
+  qtyInput.setAttribute('data-edit-quantity-for', entry.id || '');
+  var qtyValue = parseInt(entry.quantity, 10);
+  if (!qtyValue || qtyValue < 1) { qtyValue = 1; }
+  qtyInput.value = String(qtyValue);
+  qtyField.appendChild(qtyInput);
+  card.appendChild(qtyField);
+
   var notesArea = document.createElement('textarea');
   notesArea.setAttribute('data-edit-notes-for', entry.id || '');
   notesArea.rows = 2;
@@ -226,9 +265,12 @@ function saveEditedEntry(entryId) {
 
   var roomSelect = document.querySelector('select[data-edit-room-for="' + entryId + '"]');
   var notesArea = document.querySelector('textarea[data-edit-notes-for="' + entryId + '"]');
+  var qtyInput = document.querySelector('input[data-edit-quantity-for="' + entryId + '"]');
   var newRoom = roomSelect ? (roomSelect.value || '').toString().trim() : '';
   var newNotes = notesArea ? (notesArea.value || '').toString() : '';
-  var payload = { id: entryId, room: newRoom, notes: newNotes };
+  var qtyValue = qtyInput ? parseInt(qtyInput.value, 10) : 1;
+  if (!qtyValue || qtyValue < 1) { qtyValue = 1; }
+  var payload = { id: entryId, room: newRoom, notes: newNotes, quantity: qtyValue };
 
   callApi('updateEntry', appState.authToken, payload)
     .then(function (updatedEntry) {

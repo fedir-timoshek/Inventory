@@ -19,6 +19,7 @@ This repo hosts the frontend on GitHub Pages and calls a Google Apps Script web 
 - Execute as: Me
 - Who has access: Anyone
 - Copy the Web app URL
+- In the Inventory sheet, add a `Quantity` column between `Room` and `Notes` (column E). `Deleted` becomes column I.
 
 2) Update frontend config
 - In `web/index.html`, set:
@@ -53,3 +54,5 @@ GitHub Pages only allows `/(root)` or `/docs` for branch deployments. If you pre
 ## Notes
 - The API validates Google ID tokens server-side.
 - If you redeploy Apps Script, update the Web App URL in `web/index.html`.
+- If `Quantity` is missing, it will default to `1`.
+- Non-admin users only see their own entries in the UI.
