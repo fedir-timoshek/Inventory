@@ -7,6 +7,7 @@ This repo hosts the frontend on GitHub Pages and calls a Google Apps Script web 
 - `web/` — frontend source for GitHub Pages (HTML/CSS/JS).
 - `web/modules/` — JavaScript modules used by `web/app.js`.
 - `web/dist/` — production build output (generated via `npm run build`).
+- `scripts/` — build helper scripts.
 - `appscript/reference/InventoryDB.xlsx` — reference data (not used at runtime).
 - `web/assets/draft of app layout.png` — UI mockup reference.
 
@@ -38,6 +39,7 @@ This repo hosts the frontend on GitHub Pages and calls a Google Apps Script web 
 - Requires Node.js 16+
 - `npm install`
 - `npm run build` to generate `web/dist` with minified JS/CSS
+- The build rewrites `web/dist/index.html` to use bundled `app.min.js` and `styles.min.css`
 
 ## Copy checklist
 - Apps Script: copy `appscript/code.gs` into your Apps Script project.
