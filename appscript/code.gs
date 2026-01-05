@@ -289,12 +289,8 @@ function verifyIdToken_(idToken) {
 }
 
 function buildJsonResponse_(obj) {
-  var output = ContentService.createTextOutput(JSON.stringify(obj))
+  return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
-  return output
-    .setHeader('Access-Control-Allow-Origin', '*')
-    .setHeader('Access-Control-Allow-Methods', 'POST, GET')
-    .setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
 function isAdmin_(email) {

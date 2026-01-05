@@ -20,12 +20,12 @@ async function copyDir(src, dest) {
 }
 
 async function buildAssets() {
-  const outDir = 'dist';
+  const outDir = 'web/dist';
   await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
 
   await build({
-    entryPoints: ['app.js'],
+    entryPoints: ['web/app.js'],
     bundle: true,
     format: 'iife',
     platform: 'browser',
@@ -35,20 +35,20 @@ async function buildAssets() {
   });
 
   await build({
-    entryPoints: ['styles.css'],
+    entryPoints: ['web/styles.css'],
     bundle: true,
     minify: true,
     outfile: join(outDir, 'styles.min.css')
   });
 
-  const srcIndex = await readFile('index.html', 'utf8');
+  const srcIndex = await readFile('web/index.html', 'utf8');
   const outIndex = srcIndex
     .replace('href="styles.css"', 'href="styles.min.css"')
     .replace(/<script\s+src="app\.js"[^>]*><\/script>/, '<script src="app.min.js"></script>');
   await writeFile(join(outDir, 'index.html'), outIndex);
 
-  if (existsSync('assets')) {
-    await copyDir('assets', join(outDir, 'assets'));
+  if (existsSync('web/assets')) {
+    await copyDir('web/assets', join(outDir, 'assets'));
   }
 }
 
