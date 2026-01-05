@@ -1,0 +1,10 @@
+{
+  "name": "inventory-web-app",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.2"
+  }
+}
