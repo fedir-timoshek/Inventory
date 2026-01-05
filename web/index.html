@@ -18,6 +18,21 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div id="loadingScreen" class="loading-screen" aria-live="polite" aria-busy="true">
+    <div class="loading-card">
+      <div class="loading-brand">
+        <div class="brand-logo" aria-hidden="true">ICS</div>
+        <div>
+          <div class="loading-title">Inventory Scanner</div>
+          <div id="loadingStatus" class="loading-status">Checking session...</div>
+        </div>
+      </div>
+      <div class="loading-bar"><span></span></div>
+      <div class="loading-foot">Preparing secure sign-in</div>
+    </div>
+    <div class="loading-orb orb-1" aria-hidden="true"></div>
+    <div class="loading-orb orb-2" aria-hidden="true"></div>
+  </div>
   <div id="authScreen" class="auth-screen hidden" aria-live="polite">
     <div class="auth-card">
       <div class="section-title">Sign in</div>

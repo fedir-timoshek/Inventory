@@ -12,6 +12,8 @@ export function cacheDom() {
   dom.userBadge = $('userBadge');
   dom.btnSignOut = $('btnSignOut');
   dom.authScreen = $('authScreen');
+  dom.loadingScreen = $('loadingScreen');
+  dom.loadingStatus = $('loadingStatus');
   dom.googleSignInButton = $('googleSignInButton');
   dom.authError = $('authError');
 

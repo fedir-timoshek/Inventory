@@ -93,7 +93,7 @@ export function startScanner() {
   }
 
   appState.scanning = true;
-  appState.torchSupported = false;
+  appState.torchSupported = null;
   appState.torchOn = false;
   updateTorchUI();
   updateScanButton();
@@ -117,7 +117,7 @@ export function startScanner() {
       });
     }
     setScanStatus('Scanning…', 'Scanning');
-    scheduleTorchCheck();
+    armTorchCheck();
   } catch (e) {
     appState.scanning = false;
     updateScanButton();
@@ -150,7 +150,7 @@ export function stopScanner() {
 }
 
 export function toggleTorch() {
-  if (!appState.torchSupported) { return; }
+  if (!appState.scanning || !appState.torchSupported) { return; }
   setTorchEnabled(!appState.torchOn, true);
 }
 
@@ -162,6 +162,12 @@ function getActiveVideoTrack() {
     }
   } catch (e) {}
   return null;
+}
+
+function armTorchCheck() {
+  scheduleTorchCheck();
+  if (!dom.video || typeof dom.video.addEventListener !== 'function') { return; }
+  dom.video.addEventListener('playing', scheduleTorchCheck, { once: true });
 }
 
 function scheduleTorchCheck() {
@@ -201,12 +207,20 @@ function updateTorchUI() {
     return;
   }
   var isScanning = appState.scanning;
-  dom.btnToggleTorch.disabled = !appState.torchSupported || !isScanning;
-  dom.btnToggleTorch.textContent = appState.torchOn ? '🔦 Flashlight on' : '🔦 Flashlight';
   if (!isScanning) {
+    dom.btnToggleTorch.disabled = true;
+    dom.btnToggleTorch.textContent = '🔦 Flashlight';
     dom.torchHint.textContent = 'Camera off';
     return;
   }
+  if (appState.torchSupported === null) {
+    dom.btnToggleTorch.disabled = true;
+    dom.btnToggleTorch.textContent = '🔦 Flashlight';
+    dom.torchHint.textContent = 'Checking...';
+    return;
+  }
+  dom.btnToggleTorch.disabled = !appState.torchSupported;
+  dom.btnToggleTorch.textContent = appState.torchOn ? '🔦 Flashlight on' : '🔦 Flashlight';
   dom.torchHint.textContent = appState.torchSupported ? (appState.torchOn ? 'On' : 'Off') : 'Not supported';
 }
 

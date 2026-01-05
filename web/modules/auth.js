@@ -7,6 +7,8 @@ var authHandlers = {};
 
 export function initAuth(handlers) {
   authHandlers = handlers || {};
+  showLoadingScreen(true, 'Checking session...');
+  showAuthScreen(false);
   waitForGsi(0);
 }
 
@@ -14,6 +16,7 @@ export function handleSignOut() {
   setAuthToken('');
   appState.userEmail = '';
   updateUserBadge();
+  showLoadingScreen(false);
   showAuthScreen(true);
 }
 
@@ -41,6 +44,15 @@ export function updateUserBadge() {
 function showAuthScreen(show) {
   if (!dom.authScreen) { return; }
   dom.authScreen.classList.toggle('hidden', !show);
+}
+
+function showLoadingScreen(show, message) {
+  if (!dom.loadingScreen) { return; }
+  if (typeof message === 'string' && dom.loadingStatus) {
+    dom.loadingStatus.textContent = message;
+  }
+  dom.loadingScreen.classList.toggle('is-hidden', !show);
+  dom.loadingScreen.setAttribute('aria-hidden', show ? 'false' : 'true');
 }
 
 function showAuthError(message) {
@@ -80,6 +92,7 @@ function waitForGsi(attempts) {
   var clientId = getGoogleClientId();
   if (!clientId) {
     showAuthError('Missing Google client ID configuration.');
+    showLoadingScreen(false);
     showAuthScreen(true);
     return;
   }
@@ -89,6 +102,7 @@ function waitForGsi(attempts) {
   }
   if (attempts >= 20) {
     showAuthError('Google sign-in library failed to load.');
+    showLoadingScreen(false);
     showAuthScreen(true);
     return;
   }
@@ -111,8 +125,10 @@ function initializeGsi(clientId) {
 
   var storedToken = loadStoredToken();
   if (storedToken) {
+    showLoadingScreen(true, 'Signing you in...');
     attemptAuth(storedToken);
   } else {
+    showLoadingScreen(false);
     showAuthScreen(true);
   }
 }
@@ -121,23 +137,28 @@ function handleCredentialResponse(response) {
   var token = response && response.credential ? response.credential : '';
   if (!token) {
     showAuthError('Sign-in failed. Please try again.');
+    showLoadingScreen(false);
     showAuthScreen(true);
     return;
   }
+  showLoadingScreen(true, 'Signing you in...');
   attemptAuth(token);
 }
 
 function attemptAuth(idToken) {
   if (!hasServer()) {
     showAuthError('Authentication requires the API URL.');
+    showLoadingScreen(false);
     showAuthScreen(true);
     return;
   }
   showAuthError('');
-  showAuthScreen(true);
+  showAuthScreen(false);
+  showLoadingScreen(true, 'Signing you in...');
   callApi('getInitialData', idToken, {})
     .then(function (data) {
       setAuthToken(idToken);
+      showLoadingScreen(false);
       showAuthScreen(false);
       if (authHandlers.onInitialData) { authHandlers.onInitialData(data); }
       if (authHandlers.onSignedIn) { authHandlers.onSignedIn(data); }
@@ -146,6 +167,7 @@ function attemptAuth(idToken) {
       setAuthToken('');
       var msg = (err && err.message) ? err.message : 'Sign-in failed. Please sign in again.';
       showAuthError(msg);
+      showLoadingScreen(false);
       showAuthScreen(true);
     });
 }
