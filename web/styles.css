@@ -623,6 +623,12 @@ video#videoPreview {
   letter-spacing: 0.04em;
 }
 
+.scan-engine-status {
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
 .scan-video-shell-success { box-shadow: 0 0 0 3px var(--success) inset; transition: box-shadow 160ms ease; }
 
 .torch-row {

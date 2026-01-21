@@ -24,11 +24,20 @@ export var appState = {
   offlineQueue: [],
   filterText: '',
   editingEntryId: null,
-  scannerSheetOpen: false
+  scannerSheetOpen: false,
+  scannerEngine: '',
+  scannerEngineLabel: '',
+  scannerEngineAvailable: false
 };
 
 export var scannerState = {
   codeReader: null,
+  barcodeDetector: null,
+  barcodeDetectorFormats: [],
+  barcodeDetectRaf: 0,
+  barcodeDetectBusy: false,
+  barcodeDetectLastTs: 0,
+  barcodeDetectIntervalMs: 140,
   lastCode: '',
   lastCodeTime: 0,
   cooldownMs: 1500,

@@ -21,6 +21,7 @@ export function cacheDom() {
   dom.video = $('videoPreview');
   dom.scanStatus = $('scanStatus');
   dom.scanStatusBadge = $('scanStatusBadge');
+  dom.scanEngineStatus = $('scanEngineStatus');
   dom.cameraSupportMessage = $('cameraSupportMessage');
   dom.cameraSelectRow = $('cameraSelectRow');
   dom.cameraSelect = $('cameraSelect');

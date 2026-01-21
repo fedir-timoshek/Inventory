@@ -3,47 +3,169 @@ import { dom } from './dom.js';
 import { showToast } from './toast.js';
 import { triggerVibrate } from './utils.js';
 
+function getUserAgent() {
+  return (navigator && navigator.userAgent) ? navigator.userAgent : '';
+}
+
+function isAndroidPlatform() {
+  return /Android/i.test(getUserAgent());
+}
+
+function isIOSPlatform() {
+  var ua = getUserAgent();
+  var isIOS = /iPad|iPhone|iPod/i.test(ua);
+  var isIPadOS = navigator && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+  return isIOS || isIPadOS;
+}
+
+function supportsZXing() {
+  return !!(window.ZXing && ZXing.BrowserMultiFormatReader);
+}
+
+function supportsBarcodeDetector() {
+  return typeof window.BarcodeDetector === 'function';
+}
+
+function selectScannerEngine() {
+  if (isAndroidPlatform()) {
+    return {
+      engine: 'barcode-detector',
+      label: 'BarcodeDetector (Android)',
+      available: supportsBarcodeDetector()
+    };
+  }
+  return {
+    engine: 'zxing',
+    label: isIOSPlatform() ? 'ZXing (iOS)' : 'ZXing (Web)',
+    available: supportsZXing()
+  };
+}
+
+function updateScanEngineStatus() {
+  if (!dom.scanEngineStatus) { return; }
+  var label = appState.scannerEngineLabel || 'Unknown';
+  var suffix = appState.scannerEngineAvailable ? '' : ' - unavailable';
+  dom.scanEngineStatus.textContent = 'Engine: ' + label + suffix;
+}
+
+function applyCameraDeviceOptions(devices) {
+  if (!dom.cameraSelectRow || !dom.cameraSelect) { return; }
+  if (!devices || devices.length <= 1) {
+    dom.cameraSelectRow.classList.add('hidden');
+    return;
+  }
+  dom.cameraSelectRow.classList.remove('hidden');
+  dom.cameraSelect.innerHTML = '';
+  var opt = document.createElement('option');
+  opt.value = '';
+  opt.textContent = 'Auto (rear preferred)';
+  dom.cameraSelect.appendChild(opt);
+  for (var i = 0; i < devices.length; i++) {
+    var d = devices[i];
+    var option = document.createElement('option');
+    option.value = d.deviceId || d.id || '';
+    option.textContent = d.label || ('Camera ' + (i + 1));
+    dom.cameraSelect.appendChild(option);
+  }
+}
+
+function populateCameraSelectWithMediaDevices() {
+  if (!(navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function')) {
+    if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
+    return;
+  }
+  navigator.mediaDevices.enumerateDevices()
+    .then(function (devices) {
+      var videoDevices = (devices || []).filter(function (device) {
+        return device && device.kind === 'videoinput';
+      });
+      applyCameraDeviceOptions(videoDevices);
+    })
+    .catch(function () {
+      if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
+    });
+}
+
+function populateCameraSelectWithZXing() {
+  try {
+    if (!supportsZXing() || typeof Promise === 'undefined') {
+      if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
+      return;
+    }
+    var tempReader = new ZXing.BrowserMultiFormatReader();
+    tempReader.listVideoInputDevices()
+      .then(function (devices) {
+        applyCameraDeviceOptions(devices || []);
+      })
+      .catch(function () {
+        if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
+      });
+  } catch (e) {
+    if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
+  }
+}
+
+function ensureBarcodeDetectorReady() {
+  if (scannerState.barcodeDetector) {
+    return Promise.resolve(scannerState.barcodeDetector);
+  }
+  if (!supportsBarcodeDetector()) {
+    return Promise.reject(new Error('BarcodeDetector API not supported.'));
+  }
+  var formatsPromise = (typeof BarcodeDetector.getSupportedFormats === 'function')
+    ? BarcodeDetector.getSupportedFormats()
+    : Promise.resolve([]);
+  return Promise.resolve(formatsPromise)
+    .catch(function () { return []; })
+    .then(function (formats) {
+      var formatList = Array.isArray(formats) ? formats : [];
+      scannerState.barcodeDetectorFormats = formatList.slice();
+      var options = formatList.length ? { formats: formatList } : undefined;
+      scannerState.barcodeDetector = new BarcodeDetector(options);
+      return scannerState.barcodeDetector;
+    });
+}
+
 export function initScannerSupport() {
   appState.cameraSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  var engineInfo = selectScannerEngine();
+  appState.scannerEngine = engineInfo.engine;
+  appState.scannerEngineLabel = engineInfo.label;
+  appState.scannerEngineAvailable = engineInfo.available;
+  updateScanEngineStatus();
   if (!appState.cameraSupported) {
     setScanStatus('Camera scanning is not supported.', 'Idle');
-    dom.cameraSupportMessage.classList.remove('hidden');
+    if (dom.cameraSupportMessage) {
+      dom.cameraSupportMessage.textContent = 'Camera scanning is not available in this browser. You can still type barcodes manually.';
+      dom.cameraSupportMessage.classList.remove('hidden');
+    }
     if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
     updateScanButton();
     updateTorchUI();
     return;
   }
-  dom.cameraSupportMessage.classList.add('hidden');
+  if (!appState.scannerEngineAvailable) {
+    setScanStatus('Scanner engine unavailable.', 'Error');
+    if (dom.cameraSupportMessage) {
+      dom.cameraSupportMessage.textContent = appState.scannerEngine === 'barcode-detector'
+        ? 'BarcodeDetector API is not supported in this browser. Update Chrome on Android or use another device.'
+        : 'Barcode scanner library is not available. You can still type barcodes manually.';
+      dom.cameraSupportMessage.classList.remove('hidden');
+    }
+    if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
+    updateScanButton();
+    updateTorchUI();
+    return;
+  }
+
+  if (dom.cameraSupportMessage) { dom.cameraSupportMessage.classList.add('hidden'); }
   updateScanButton();
   updateTorchUI();
 
-  try {
-    if (window.ZXing && ZXing.BrowserMultiFormatReader && typeof Promise !== 'undefined') {
-      var tempReader = new ZXing.BrowserMultiFormatReader();
-      tempReader.listVideoInputDevices()
-        .then(function (devices) {
-          if (!devices || devices.length <= 1) {
-            dom.cameraSelectRow.classList.add('hidden');
-            return;
-          }
-          dom.cameraSelectRow.classList.remove('hidden');
-          dom.cameraSelect.innerHTML = '';
-          var opt = document.createElement('option');
-          opt.value = '';
-          opt.textContent = 'Auto (rear preferred)';
-          dom.cameraSelect.appendChild(opt);
-          for (var i = 0; i < devices.length; i++) {
-            var d = devices[i];
-            var option = document.createElement('option');
-            option.value = d.deviceId || d.id || '';
-            option.textContent = d.label || ('Camera ' + (i + 1));
-            dom.cameraSelect.appendChild(option);
-          }
-        })
-        .catch(function () { dom.cameraSelectRow.classList.add('hidden'); });
-    }
-  } catch (e) {
-    dom.cameraSelectRow.classList.add('hidden');
+  if (appState.scannerEngine === 'barcode-detector') {
+    populateCameraSelectWithMediaDevices();
+  } else {
+    populateCameraSelectWithZXing();
   }
   setScanStatus('Camera off', 'Idle');
 }
@@ -80,9 +202,19 @@ export function startScanner() {
     showToast('Camera scanning is not available on this device.', 'error');
     return;
   }
+  if (!appState.scannerEngineAvailable) {
+    showToast('Barcode scanning is not available in this browser.', 'error');
+    setScanStatus('Scanner engine unavailable.', 'Error');
+    return;
+  }
   if (appState.scanning) { return; }
 
-  if (!(window.ZXing && ZXing.BrowserMultiFormatReader)) {
+  if (appState.scannerEngine === 'barcode-detector') {
+    startBarcodeDetectorScanner();
+    return;
+  }
+
+  if (!supportsZXing()) {
     setScanStatus('Scanner library failed to load.', 'Error');
     showToast('Barcode scanner library not available.', 'error');
     return;
@@ -126,8 +258,116 @@ export function startScanner() {
   }
 }
 
+function startBarcodeDetectorScanner() {
+  appState.scanning = true;
+  appState.torchSupported = null;
+  appState.torchOn = false;
+  updateTorchUI();
+  updateScanButton();
+  setScanStatus('Requesting camera…', 'Scanning');
+
+  ensureBarcodeDetectorReady()
+    .then(function () {
+      if (!appState.scanning) { throw new Error('Scan cancelled.'); }
+      return startBarcodeDetectorStream();
+    })
+    .then(function () {
+      if (!appState.scanning) { return; }
+      setScanStatus('Scanning…', 'Scanning');
+      armTorchCheck();
+      startBarcodeDetectLoop();
+    })
+    .catch(function (err) {
+      if (!appState.scanning) { return; }
+      appState.scanning = false;
+      updateScanButton();
+      setScanStatus('Camera error: ' + (err && err.message ? err.message : ''), 'Error');
+      showToast('Could not start camera. Check permissions.', 'error');
+    });
+}
+
+function startBarcodeDetectorStream() {
+  var constraints = { video: { facingMode: { ideal: 'environment' } }, audio: false };
+  if (appState.selectedCameraId) {
+    constraints.video.deviceId = { exact: appState.selectedCameraId };
+  }
+  return navigator.mediaDevices.getUserMedia(constraints)
+    .then(function (stream) {
+      if (!dom.video) {
+        if (stream && typeof stream.getTracks === 'function') {
+          stream.getTracks().forEach(function (t) { t.stop(); });
+        }
+        throw new Error('Video element not available.');
+      }
+      dom.video.srcObject = stream;
+      var playPromise = dom.video.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        return playPromise;
+      }
+      return null;
+    });
+}
+
+function startBarcodeDetectLoop() {
+  scannerState.barcodeDetectLastTs = 0;
+  if (scannerState.barcodeDetectRaf) {
+    cancelAnimationFrame(scannerState.barcodeDetectRaf);
+  }
+  scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+}
+
+function stopBarcodeDetectLoop() {
+  if (scannerState.barcodeDetectRaf) {
+    cancelAnimationFrame(scannerState.barcodeDetectRaf);
+  }
+  scannerState.barcodeDetectRaf = 0;
+  scannerState.barcodeDetectBusy = false;
+}
+
+function runBarcodeDetectLoop(timestamp) {
+  if (!appState.scanning || !scannerState.barcodeDetector) { return; }
+  if (scannerState.barcodeDetectBusy) {
+    scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+    return;
+  }
+  if (timestamp - scannerState.barcodeDetectLastTs < scannerState.barcodeDetectIntervalMs) {
+    scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+    return;
+  }
+  if (!dom.video || dom.video.readyState < 2) {
+    scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+    return;
+  }
+  scannerState.barcodeDetectBusy = true;
+  scannerState.barcodeDetectLastTs = timestamp;
+  scannerState.barcodeDetector.detect(dom.video)
+    .then(function (barcodes) {
+      scannerState.barcodeDetectBusy = false;
+      if (!appState.scanning) { return; }
+      if (barcodes && barcodes.length) {
+        var value = getBarcodeValue(barcodes[0]);
+        onBarcodeDetected(value);
+      }
+      if (appState.scanning) {
+        scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+      }
+    })
+    .catch(function () {
+      scannerState.barcodeDetectBusy = false;
+      if (appState.scanning) {
+        scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+      }
+    });
+}
+
+function getBarcodeValue(barcode) {
+  if (!barcode) { return ''; }
+  return barcode.rawValue || barcode.data || barcode.displayValue || '';
+}
+
 export function stopScanner() {
   appState.scanning = false;
+  stopBarcodeDetectLoop();
   if (appState.torchOn) { setTorchEnabled(false, false); }
   appState.torchSupported = false;
   appState.torchOn = false;
@@ -200,10 +440,10 @@ function refreshTorchSupport(track) {
 
 function updateTorchUI() {
   if (!dom.torchRow || !dom.btnToggleTorch || !dom.torchHint) { return; }
-  if (!appState.cameraSupported) {
+  if (!appState.cameraSupported || !appState.scannerEngineAvailable) {
     dom.btnToggleTorch.disabled = true;
     dom.btnToggleTorch.textContent = '🔦 Flashlight';
-    dom.torchHint.textContent = 'Not supported';
+    dom.torchHint.textContent = 'Unavailable';
     return;
   }
   var isScanning = appState.scanning;
@@ -272,6 +512,11 @@ function updateScanButton() {
   if (!appState.cameraSupported) {
     dom.btnStopScan.disabled = true;
     dom.btnStopScan.textContent = 'Camera unavailable';
+    return;
+  }
+  if (!appState.scannerEngineAvailable) {
+    dom.btnStopScan.disabled = true;
+    dom.btnStopScan.textContent = 'Scanner unavailable';
     return;
   }
   dom.btnStopScan.disabled = false;
