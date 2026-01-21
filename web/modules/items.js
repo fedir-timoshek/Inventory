@@ -155,12 +155,21 @@ function updateEntryImageInState(updatedEntry) {
 }
 
 function shouldQueueNetworkError(err) {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return true;
+    }
+  } catch (e) {}
   if (!err) { return true; }
   if (err.name === 'AbortError') { return true; }
+  if (err.name === 'TypeError') { return true; }
   var message = (err.message || '').toLowerCase();
   if (!message) { return true; }
   if (message.indexOf('timed out') > -1) { return true; }
   if (message.indexOf('failed to fetch') > -1) { return true; }
+  if (message.indexOf('load failed') > -1) { return true; }
+  if (message.indexOf('fetch failed') > -1) { return true; }
+  if (message.indexOf('networkerror') > -1) { return true; }
   if (message.indexOf('network') > -1) { return true; }
   return false;
 }
