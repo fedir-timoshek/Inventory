@@ -3,6 +3,10 @@ import { dom } from './dom.js';
 import { showToast } from './toast.js';
 import { triggerVibrate } from './utils.js';
 
+var scanConfig = readScanConfig_();
+var scanDebug = createScanDebug_();
+var scanSession = createScanSession_();
+
 function getUserAgent() {
   return (navigator && navigator.userAgent) ? navigator.userAgent : '';
 }
@@ -27,16 +31,45 @@ function supportsBarcodeDetector() {
 }
 
 function selectScannerEngine() {
+  var preference = scanConfig && scanConfig.scanEngine ? scanConfig.scanEngine : 'auto';
+  if (preference === 'native') {
+    return {
+      engine: 'barcode-detector',
+      label: 'BarcodeDetector (forced)',
+      available: supportsBarcodeDetector()
+    };
+  }
+  if (preference === 'fallback') {
+    return {
+      engine: 'zxing',
+      label: 'ZXing (forced)',
+      available: supportsZXing()
+    };
+  }
+  if (preference === 'auto') {
+    if (supportsBarcodeDetector()) {
+      return {
+        engine: 'barcode-detector',
+        label: 'BarcodeDetector (auto)',
+        available: true
+      };
+    }
+    return {
+      engine: 'zxing',
+      label: 'ZXing (auto)',
+      available: supportsZXing()
+    };
+  }
   if (isAndroidPlatform()) {
     return {
       engine: 'barcode-detector',
-      label: 'BarcodeDetector (Android)',
+      label: 'BarcodeDetector (legacy)',
       available: supportsBarcodeDetector()
     };
   }
   return {
     engine: 'zxing',
-    label: isIOSPlatform() ? 'ZXing (iOS)' : 'ZXing (Web)',
+    label: isIOSPlatform() ? 'ZXing (legacy iOS)' : 'ZXing (legacy)',
     available: supportsZXing()
   };
 }
@@ -119,8 +152,9 @@ function ensureBarcodeDetectorReady() {
     .catch(function () { return []; })
     .then(function (formats) {
       var formatList = Array.isArray(formats) ? formats : [];
-      scannerState.barcodeDetectorFormats = formatList.slice();
-      var options = formatList.length ? { formats: formatList } : undefined;
+      var picked = pickBarcodeDetectorFormats_(formatList);
+      scannerState.barcodeDetectorFormats = picked.slice();
+      var options = picked.length ? { formats: picked } : undefined;
       scannerState.barcodeDetector = new BarcodeDetector(options);
       return scannerState.barcodeDetector;
     });
@@ -220,10 +254,13 @@ export function startScanner() {
     return;
   }
 
-  if (!scannerState.codeReader) {
-    scannerState.codeReader = new ZXing.BrowserMultiFormatReader();
+  if (!scannerState.codeReader || scannerState.zxingProfile !== scanSession.profile) {
+    scannerState.codeReader = createZXingReader_();
+    scannerState.zxingProfile = scanSession.profile;
   }
+  configureZXingReader_();
 
+  beginScanSession_();
   appState.scanning = true;
   appState.torchSupported = null;
   appState.torchOn = false;
@@ -231,15 +268,28 @@ export function startScanner() {
   updateScanButton();
   setScanStatus('Requesting camera…', 'Scanning');
 
-  var deviceId = appState.selectedCameraId || undefined;
   try {
-    var startPromise = scannerState.codeReader.decodeFromVideoDevice(deviceId, dom.video, function (result, err) {
-      if (!appState.scanning) { return; }
-      if (result) {
-        var text = result.text || (result.getText ? result.getText() : '');
-        onBarcodeDetected(text);
-      } else if (err && err.name !== 'NotFoundException') { console.log('Decode error:', err); }
-    });
+    var startPromise;
+    if (isBalancedProfile_()) {
+      startPromise = scannerState.codeReader.decodeFromConstraints(buildVideoConstraints_(), dom.video, function (result, err) {
+        if (!appState.scanning) { return; }
+        recordScanResult_(!!result);
+        if (result) {
+          var text = result.text || (result.getText ? result.getText() : '');
+          onBarcodeDetected(text);
+        } else if (err && err.name !== 'NotFoundException') { console.log('Decode error:', err); }
+      });
+    } else {
+      var deviceId = appState.selectedCameraId || undefined;
+      startPromise = scannerState.codeReader.decodeFromVideoDevice(deviceId, dom.video, function (result, err) {
+        if (!appState.scanning) { return; }
+        recordScanResult_(!!result);
+        if (result) {
+          var text = result.text || (result.getText ? result.getText() : '');
+          onBarcodeDetected(text);
+        } else if (err && err.name !== 'NotFoundException') { console.log('Decode error:', err); }
+      });
+    }
     if (startPromise && typeof startPromise.catch === 'function') {
       startPromise.catch(function (err) {
         appState.scanning = false;
@@ -259,6 +309,7 @@ export function startScanner() {
 }
 
 function startBarcodeDetectorScanner() {
+  beginScanSession_();
   appState.scanning = true;
   appState.torchSupported = null;
   appState.torchOn = false;
@@ -287,10 +338,7 @@ function startBarcodeDetectorScanner() {
 }
 
 function startBarcodeDetectorStream() {
-  var constraints = { video: { facingMode: { ideal: 'environment' } }, audio: false };
-  if (appState.selectedCameraId) {
-    constraints.video.deviceId = { exact: appState.selectedCameraId };
-  }
+  var constraints = buildVideoConstraints_();
   return navigator.mediaDevices.getUserMedia(constraints)
     .then(function (stream) {
       if (!dom.video) {
@@ -310,52 +358,62 @@ function startBarcodeDetectorStream() {
 
 function startBarcodeDetectLoop() {
   scannerState.barcodeDetectLastTs = 0;
-  if (scannerState.barcodeDetectRaf) {
-    cancelAnimationFrame(scannerState.barcodeDetectRaf);
-  }
-  scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+  stopBarcodeDetectLoop();
+  scannerState.barcodeDetectUsingVfc = shouldUseVideoFrameCallback_();
+  scheduleNextBarcodeDetect_();
 }
 
 function stopBarcodeDetectLoop() {
   if (scannerState.barcodeDetectRaf) {
     cancelAnimationFrame(scannerState.barcodeDetectRaf);
   }
+  if (scannerState.barcodeDetectVfcId && dom.video && typeof dom.video.cancelVideoFrameCallback === 'function') {
+    dom.video.cancelVideoFrameCallback(scannerState.barcodeDetectVfcId);
+  }
   scannerState.barcodeDetectRaf = 0;
+  scannerState.barcodeDetectVfcId = 0;
   scannerState.barcodeDetectBusy = false;
 }
 
 function runBarcodeDetectLoop(timestamp) {
   if (!appState.scanning || !scannerState.barcodeDetector) { return; }
+  var nowTs = (typeof timestamp === 'number') ? timestamp : getNowMs_();
   if (scannerState.barcodeDetectBusy) {
-    scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+    scheduleNextBarcodeDetect_();
     return;
   }
-  if (timestamp - scannerState.barcodeDetectLastTs < scannerState.barcodeDetectIntervalMs) {
-    scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+  var intervalMs = getDetectIntervalMs_();
+  if (nowTs - scannerState.barcodeDetectLastTs < intervalMs) {
+    scheduleNextBarcodeDetect_();
     return;
   }
   if (!dom.video || dom.video.readyState < 2) {
-    scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+    scheduleNextBarcodeDetect_();
     return;
   }
   scannerState.barcodeDetectBusy = true;
-  scannerState.barcodeDetectLastTs = timestamp;
-  scannerState.barcodeDetector.detect(dom.video)
+  scannerState.barcodeDetectLastTs = nowTs;
+  var source = getBarcodeDetectSource_(dom.video);
+  scannerState.barcodeDetector.detect(source)
     .then(function (barcodes) {
       scannerState.barcodeDetectBusy = false;
       if (!appState.scanning) { return; }
       if (barcodes && barcodes.length) {
+        recordScanResult_(true);
         var value = getBarcodeValue(barcodes[0]);
         onBarcodeDetected(value);
+      } else {
+        recordScanResult_(false);
       }
       if (appState.scanning) {
-        scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+        scheduleNextBarcodeDetect_();
       }
     })
     .catch(function () {
       scannerState.barcodeDetectBusy = false;
+      recordScanResult_(false);
       if (appState.scanning) {
-        scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+        scheduleNextBarcodeDetect_();
       }
     });
 }
@@ -367,6 +425,7 @@ function getBarcodeValue(barcode) {
 
 export function stopScanner() {
   appState.scanning = false;
+  endScanSession_();
   stopBarcodeDetectLoop();
   if (appState.torchOn) { setTorchEnabled(false, false); }
   appState.torchSupported = false;
@@ -426,6 +485,7 @@ function scheduleTorchCheck() {
 }
 
 function refreshTorchSupport(track) {
+  configureTrackForScanning_(track);
   var supported = false;
   if (track && typeof track.getCapabilities === 'function') {
     var caps = track.getCapabilities();
@@ -534,4 +594,476 @@ function focusRoomField() {
       dom.selectRoom.focus();
     }
   } catch (e) {}
+}
+
+function readScanConfig_() {
+  var config = { scanDebug: false, scanEngine: 'auto', scanProfile: 'legacy' };
+  try {
+    if (typeof window === 'undefined' || !window.location) { return config; }
+    var params = new URLSearchParams(window.location.search);
+    config.scanDebug = params.get('scanDebug') === '1';
+    var engine = (params.get('scanEngine') || '').toLowerCase();
+    if (engine === 'auto' || engine === 'native' || engine === 'fallback' || engine === 'legacy') {
+      config.scanEngine = engine;
+    }
+    var profile = (params.get('scanProfile') || '').toLowerCase();
+    if (profile === 'balanced' || profile === 'legacy') {
+      config.scanProfile = profile;
+    }
+  } catch (e) {}
+  return config;
+}
+
+function createScanDebug_() {
+  var enabled = !!(scanConfig && scanConfig.scanDebug);
+  var state = {
+    enabled: enabled,
+    startedAt: 0,
+    firstDecodeMs: null,
+    attempts: 0,
+    successes: 0,
+    lastAttempts: [],
+    rafId: 0,
+    lastRafTs: 0,
+    frameCount: 0,
+    jankFrames: 0,
+    totalFrameMs: 0
+  };
+  if (enabled && typeof window !== 'undefined') {
+    window.__scanDebug = state;
+  }
+  return state;
+}
+
+function createScanSession_() {
+  return {
+    profile: scanConfig && scanConfig.scanProfile ? scanConfig.scanProfile : 'legacy',
+    startedAt: 0,
+    lastSuccessTs: 0,
+    noSuccessStartTs: 0,
+    lastHintTs: 0,
+    lastFarTs: 0,
+    trackConfigured: false,
+    activeTrack: null,
+    zoomApplied: false,
+    zoomValue: 0,
+    fastIntervalMs: 120,
+    farEveryMs: 400,
+    fastRoi: { widthRatio: 0.6, heightRatio: 0.45 },
+    farRoi: { widthRatio: 0.9, heightRatio: 0.7 },
+    fastMaxWidth: 640,
+    farMaxWidth: 1600,
+    fastScaleUp: 1,
+    farScaleUp: 1.4,
+    autoZoomDelayMs: 1800
+  };
+}
+
+function resetScanSession_() {
+  scanSession.profile = scanConfig && scanConfig.scanProfile ? scanConfig.scanProfile : 'legacy';
+  scanSession.startedAt = getNowMs_();
+  scanSession.lastSuccessTs = 0;
+  scanSession.noSuccessStartTs = 0;
+  scanSession.lastHintTs = 0;
+  scanSession.lastFarTs = 0;
+  scanSession.trackConfigured = false;
+  scanSession.activeTrack = null;
+  scanSession.zoomApplied = false;
+  scanSession.zoomValue = 0;
+}
+
+function beginScanSession_() {
+  resetScanSession_();
+  if (!scanDebug.enabled) { return; }
+  resetScanDebug_();
+  startJankMonitor_();
+}
+
+function endScanSession_() {
+  resetAutoZoom_('stop');
+  if (!scanDebug.enabled) { return; }
+  stopJankMonitor_();
+  reportScanDebug_('stop');
+}
+
+function resetScanDebug_() {
+  scanDebug.startedAt = getNowMs_();
+  scanDebug.firstDecodeMs = null;
+  scanDebug.attempts = 0;
+  scanDebug.successes = 0;
+  scanDebug.lastAttempts = [];
+  scanDebug.lastRafTs = 0;
+  scanDebug.frameCount = 0;
+  scanDebug.jankFrames = 0;
+  scanDebug.totalFrameMs = 0;
+}
+
+function recordDecodeAttempt_(success) {
+  if (!scanDebug.enabled) { return; }
+  scanDebug.attempts += 1;
+  if (success) {
+    scanDebug.successes += 1;
+    if (scanDebug.firstDecodeMs === null) {
+      scanDebug.firstDecodeMs = Math.max(0, getNowMs_() - scanDebug.startedAt);
+    }
+  }
+  scanDebug.lastAttempts.push(!!success);
+  if (scanDebug.lastAttempts.length > 20) {
+    scanDebug.lastAttempts.shift();
+  }
+}
+
+function recordScanResult_(success) {
+  var now = getNowMs_();
+  if (success) {
+    scanSession.lastSuccessTs = now;
+    scanSession.noSuccessStartTs = 0;
+  } else if (!scanSession.noSuccessStartTs) {
+    scanSession.noSuccessStartTs = now;
+  }
+  maybeApplyAutoZoom_();
+  maybeShowScanHint_();
+  recordDecodeAttempt_(success);
+}
+
+function isBalancedProfile_() {
+  return scanSession.profile === 'balanced';
+}
+
+function maybeShowScanHint_() {
+  if (!isBalancedProfile_()) { return; }
+  if (!scanSession.noSuccessStartTs) { return; }
+  var now = getNowMs_();
+  if (now - scanSession.noSuccessStartTs < 2000) { return; }
+  if (now - scanSession.lastHintTs < 8000) { return; }
+  showToast('Move closer, keep the code centered, and hold steady.', 'info');
+  scanSession.lastHintTs = now;
+}
+
+function maybeApplyAutoZoom_() {
+  if (!isBalancedProfile_()) { return; }
+  if (scanSession.zoomApplied) { return; }
+  if (!scanSession.activeTrack) { return; }
+  var now = getNowMs_();
+  var sinceSuccess = scanSession.lastSuccessTs ? (now - scanSession.lastSuccessTs) : (now - scanSession.startedAt);
+  if (sinceSuccess < scanSession.autoZoomDelayMs) { return; }
+  var caps = getTrackCapabilities_(scanSession.activeTrack);
+  if (!caps || !caps.zoom) { return; }
+  var desired = caps.zoom.min + (caps.zoom.max - caps.zoom.min) * 0.35;
+  desired = alignToStep_(desired, caps.zoom.step);
+  applyTrackConstraints_(scanSession.activeTrack, { zoom: desired });
+  scanSession.zoomApplied = true;
+  scanSession.zoomValue = desired;
+}
+
+function resetAutoZoom_(reason) {
+  if (!scanSession.zoomApplied) { return; }
+  if (!scanSession.activeTrack) { return; }
+  var caps = getTrackCapabilities_(scanSession.activeTrack);
+  if (!caps || !caps.zoom) { return; }
+  var desired = alignToStep_(caps.zoom.min, caps.zoom.step);
+  applyTrackConstraints_(scanSession.activeTrack, { zoom: desired });
+  scanSession.zoomApplied = false;
+  scanSession.zoomValue = desired;
+  if (scanDebug.enabled) {
+    console.log('[scanDebug] zoom reset', reason || '');
+  }
+}
+
+function reportScanDebug_(label) {
+  if (!scanDebug.enabled) { return; }
+  var snapshot = getScanDebugSnapshot_();
+  console.log('[scanDebug]', label || 'report', snapshot);
+}
+
+function getScanDebugSnapshot_() {
+  var now = getNowMs_();
+  var elapsedMs = Math.max(1, now - scanDebug.startedAt);
+  var attemptsPerSec = scanDebug.attempts / (elapsedMs / 1000);
+  var windowAttempts = scanDebug.lastAttempts.length;
+  var windowSuccesses = 0;
+  for (var i = 0; i < scanDebug.lastAttempts.length; i++) {
+    if (scanDebug.lastAttempts[i]) { windowSuccesses += 1; }
+  }
+  var successRate20 = windowAttempts ? (windowSuccesses / windowAttempts) : 0;
+  var avgFrameMs = scanDebug.frameCount ? (scanDebug.totalFrameMs / scanDebug.frameCount) : 0;
+  return {
+    elapsedMs: Math.round(elapsedMs),
+    attempts: scanDebug.attempts,
+    successes: scanDebug.successes,
+    attemptsPerSec: round2_(attemptsPerSec),
+    firstDecodeMs: scanDebug.firstDecodeMs === null ? null : Math.round(scanDebug.firstDecodeMs),
+    successRate20: round2_(successRate20),
+    jankFrames: scanDebug.jankFrames,
+    avgFrameMs: round2_(avgFrameMs)
+  };
+}
+
+function startJankMonitor_() {
+  if (!scanDebug.enabled || scanDebug.rafId) { return; }
+  scanDebug.lastRafTs = 0;
+  var tick = function (ts) {
+    if (!scanDebug.enabled) { return; }
+    if (scanDebug.lastRafTs) {
+      var delta = ts - scanDebug.lastRafTs;
+      scanDebug.frameCount += 1;
+      scanDebug.totalFrameMs += delta;
+      if (delta > 120) { scanDebug.jankFrames += 1; }
+    }
+    scanDebug.lastRafTs = ts;
+    scanDebug.rafId = requestAnimationFrame(tick);
+  };
+  scanDebug.rafId = requestAnimationFrame(tick);
+}
+
+function stopJankMonitor_() {
+  if (scanDebug.rafId) {
+    cancelAnimationFrame(scanDebug.rafId);
+    scanDebug.rafId = 0;
+  }
+}
+
+function buildVideoConstraints_() {
+  var video = { facingMode: { ideal: 'environment' } };
+  if (appState.selectedCameraId) {
+    video.deviceId = { exact: appState.selectedCameraId };
+  }
+  if (isBalancedProfile_()) {
+    video.width = { ideal: 1280 };
+    video.height = { ideal: 720 };
+  }
+  return { video: video, audio: false };
+}
+
+function configureTrackForScanning_(track) {
+  if (!track) { return; }
+  scanSession.activeTrack = track;
+  if (!isBalancedProfile_()) { return; }
+  if (scanSession.trackConfigured) { return; }
+  scanSession.trackConfigured = true;
+  var caps = getTrackCapabilities_(track);
+  if (!caps) { return; }
+  var constraints = {};
+  var focusMode = pickCapMode_(caps.focusMode, ['continuous', 'auto']);
+  if (focusMode) { constraints.focusMode = focusMode; }
+  var exposureMode = pickCapMode_(caps.exposureMode, ['continuous', 'auto']);
+  if (exposureMode) { constraints.exposureMode = exposureMode; }
+  var whiteBalanceMode = pickCapMode_(caps.whiteBalanceMode, ['continuous', 'auto']);
+  if (whiteBalanceMode) { constraints.whiteBalanceMode = whiteBalanceMode; }
+  if (Object.keys(constraints).length) {
+    applyTrackConstraints_(track, constraints);
+  }
+}
+
+function getTrackCapabilities_(track) {
+  try {
+    if (track && typeof track.getCapabilities === 'function') {
+      return track.getCapabilities();
+    }
+  } catch (e) {}
+  return null;
+}
+
+function applyTrackConstraints_(track, constraints) {
+  if (!track || typeof track.applyConstraints !== 'function') { return; }
+  try {
+    track.applyConstraints({ advanced: [constraints] })
+      .catch(function () {});
+  } catch (e) {}
+}
+
+function pickCapMode_(modes, preferred) {
+  if (!modes || !modes.length) { return ''; }
+  for (var i = 0; i < preferred.length; i++) {
+    if (modes.indexOf(preferred[i]) > -1) {
+      return preferred[i];
+    }
+  }
+  return '';
+}
+
+function alignToStep_(value, step) {
+  if (!step || step <= 0) { return value; }
+  return Math.round(value / step) * step;
+}
+
+function shouldUseVideoFrameCallback_() {
+  return isBalancedProfile_() && dom.video && typeof dom.video.requestVideoFrameCallback === 'function';
+}
+
+function scheduleNextBarcodeDetect_() {
+  if (scannerState.barcodeDetectUsingVfc && dom.video && typeof dom.video.requestVideoFrameCallback === 'function') {
+    scannerState.barcodeDetectVfcId = dom.video.requestVideoFrameCallback(runBarcodeDetectLoop);
+  } else {
+    scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
+  }
+}
+
+function getDetectIntervalMs_() {
+  if (isBalancedProfile_()) {
+    return scanSession.fastIntervalMs;
+  }
+  return scannerState.barcodeDetectIntervalMs;
+}
+
+function getBarcodeDetectSource_(video) {
+  if (!isBalancedProfile_() || !video || !video.videoWidth || !video.videoHeight) {
+    return video;
+  }
+  var pass = getScanPass_(video.videoWidth, video.videoHeight);
+  if (!pass || !pass.roi || !pass.target) { return video; }
+  var canvasInfo = ensureBarcodeCanvas_(pass.target.width, pass.target.height);
+  var ctx = canvasInfo.ctx;
+  ctx.imageSmoothingEnabled = true;
+  if (ctx.imageSmoothingQuality) { ctx.imageSmoothingQuality = 'high'; }
+  ctx.drawImage(video, pass.roi.sx, pass.roi.sy, pass.roi.sw, pass.roi.sh, 0, 0, pass.target.width, pass.target.height);
+  return canvasInfo.canvas;
+}
+
+function ensureBarcodeCanvas_(width, height) {
+  if (!scannerState.barcodeCanvas) {
+    scannerState.barcodeCanvas = document.createElement('canvas');
+  }
+  if (scannerState.barcodeCanvas.width !== width || scannerState.barcodeCanvas.height !== height) {
+    scannerState.barcodeCanvas.width = width;
+    scannerState.barcodeCanvas.height = height;
+  }
+  if (!scannerState.barcodeCanvasCtx) {
+    scannerState.barcodeCanvasCtx = scannerState.barcodeCanvas.getContext('2d');
+  }
+  return { canvas: scannerState.barcodeCanvas, ctx: scannerState.barcodeCanvasCtx };
+}
+
+function getScanPass_(videoW, videoH) {
+  if (!isBalancedProfile_()) { return null; }
+  var now = getNowMs_();
+  var useFar = (now - scanSession.lastFarTs) >= scanSession.farEveryMs;
+  var roiConfig = useFar ? scanSession.farRoi : scanSession.fastRoi;
+  if (useFar) { scanSession.lastFarTs = now; }
+  var roi = computeCenteredRoi_(videoW, videoH, roiConfig.widthRatio, roiConfig.heightRatio);
+  var maxWidth = useFar ? scanSession.farMaxWidth : scanSession.fastMaxWidth;
+  var scaleUp = useFar ? scanSession.farScaleUp : scanSession.fastScaleUp;
+  var target = getTargetSize_(roi.sw, roi.sh, maxWidth, scaleUp);
+  return { mode: useFar ? 'far' : 'fast', roi: roi, target: target };
+}
+
+function computeCenteredRoi_(videoW, videoH, widthRatio, heightRatio) {
+  var sw = Math.max(1, Math.round(videoW * widthRatio));
+  var sh = Math.max(1, Math.round(videoH * heightRatio));
+  var sx = Math.max(0, Math.floor((videoW - sw) / 2));
+  var sy = Math.max(0, Math.floor((videoH - sh) / 2));
+  return { sx: sx, sy: sy, sw: sw, sh: sh };
+}
+
+function getTargetSize_(sourceW, sourceH, maxWidth, scaleUp) {
+  var targetW = sourceW;
+  if (scaleUp && scaleUp > 1) {
+    targetW = Math.round(sourceW * scaleUp);
+  }
+  var width = Math.min(targetW, maxWidth);
+  var height = Math.max(1, Math.round(width * (sourceH / sourceW)));
+  return { width: width, height: height };
+}
+
+function pickBarcodeDetectorFormats_(formats) {
+  if (!Array.isArray(formats) || !formats.length) { return []; }
+  if (!isBalancedProfile_()) { return formats.slice(); }
+  var preferred = ['code_128', 'code_39'];
+  var picked = [];
+  for (var i = 0; i < preferred.length; i++) {
+    if (formats.indexOf(preferred[i]) > -1) {
+      picked.push(preferred[i]);
+    }
+  }
+  for (var j = 0; j < formats.length; j++) {
+    if (picked.indexOf(formats[j]) === -1) {
+      picked.push(formats[j]);
+    }
+  }
+  return picked;
+}
+
+function createZXingReader_() {
+  scannerState.zxingOriginalDrawFrame = null;
+  var hints = buildZXingHints_(isBalancedProfile_());
+  var delay = isBalancedProfile_() ? 200 : 500;
+  try {
+    return new ZXing.BrowserMultiFormatReader(hints, delay);
+  } catch (e) {
+    return new ZXing.BrowserMultiFormatReader();
+  }
+}
+
+function configureZXingReader_() {
+  if (!scannerState.codeReader) { return; }
+  if (!scannerState.zxingOriginalDrawFrame) {
+    scannerState.zxingOriginalDrawFrame = scannerState.codeReader.drawFrameOnCanvas;
+  }
+  if (isBalancedProfile_()) {
+    scannerState.codeReader.timeBetweenDecodingAttempts = scanSession.fastIntervalMs;
+    scannerState.codeReader.timeBetweenScansMillis = 200;
+    scannerState.codeReader.drawFrameOnCanvas = function (srcElement, dimensions, canvasElementContext) {
+      if (!srcElement || !srcElement.videoWidth || !srcElement.videoHeight || !canvasElementContext) {
+        return scannerState.zxingOriginalDrawFrame.call(scannerState.codeReader, srcElement, dimensions, canvasElementContext);
+      }
+      var pass = getScanPass_(srcElement.videoWidth, srcElement.videoHeight);
+      if (!pass || !pass.roi) {
+        return scannerState.zxingOriginalDrawFrame.call(scannerState.codeReader, srcElement, dimensions, canvasElementContext);
+      }
+      canvasElementContext.imageSmoothingEnabled = true;
+      if (canvasElementContext.imageSmoothingQuality) { canvasElementContext.imageSmoothingQuality = 'high'; }
+      var targetW = pass.target && pass.target.width ? pass.target.width : srcElement.videoWidth;
+      var targetH = pass.target && pass.target.height ? pass.target.height : srcElement.videoHeight;
+      if (canvasElementContext.canvas) {
+        if (canvasElementContext.canvas.width !== targetW || canvasElementContext.canvas.height !== targetH) {
+          canvasElementContext.canvas.width = targetW;
+          canvasElementContext.canvas.height = targetH;
+        }
+      }
+      canvasElementContext.drawImage(
+        srcElement,
+        pass.roi.sx,
+        pass.roi.sy,
+        pass.roi.sw,
+        pass.roi.sh,
+        0,
+        0,
+        targetW,
+        targetH
+      );
+    };
+  } else if (scannerState.zxingOriginalDrawFrame) {
+    scannerState.codeReader.drawFrameOnCanvas = scannerState.zxingOriginalDrawFrame;
+  }
+}
+
+function buildZXingHints_(tryHarder) {
+  if (!window.ZXing || !ZXing.DecodeHintType || !ZXing.BarcodeFormat) { return null; }
+  var formats = [];
+  if (ZXing.BarcodeFormat.CODE_128) { formats.push(ZXing.BarcodeFormat.CODE_128); }
+  if (ZXing.BarcodeFormat.CODE_39) { formats.push(ZXing.BarcodeFormat.CODE_39); }
+  if (ZXing.BarcodeFormat.EAN_13) { formats.push(ZXing.BarcodeFormat.EAN_13); }
+  if (ZXing.BarcodeFormat.EAN_8) { formats.push(ZXing.BarcodeFormat.EAN_8); }
+  if (ZXing.BarcodeFormat.UPC_A) { formats.push(ZXing.BarcodeFormat.UPC_A); }
+  if (ZXing.BarcodeFormat.UPC_E) { formats.push(ZXing.BarcodeFormat.UPC_E); }
+  if (ZXing.BarcodeFormat.QR_CODE) { formats.push(ZXing.BarcodeFormat.QR_CODE); }
+  var hints = new Map();
+  if (formats.length) {
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+  }
+  if (tryHarder) {
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+  }
+  return hints;
+}
+
+function getNowMs_() {
+  if (typeof performance !== 'undefined' && performance.now) {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function round2_(value) {
+  return Math.round(value * 100) / 100;
 }
