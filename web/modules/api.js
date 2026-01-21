@@ -2,11 +2,11 @@ import { APP_CONFIG } from './state.js';
 
 export function initConfig() {
   var metaClient = document.querySelector('meta[name="google-client-id"]');
-  if (metaClient && metaClient.content) {
+  if (metaClient && metaClient.content && !isPlaceholder(metaClient.content)) {
     APP_CONFIG.googleClientId = metaClient.content;
   }
   var metaApi = document.querySelector('meta[name="api-url"]');
-  if (metaApi && metaApi.content) {
+  if (metaApi && metaApi.content && !isPlaceholder(metaApi.content)) {
     APP_CONFIG.apiUrl = metaApi.content;
   }
 }
@@ -98,4 +98,9 @@ export function callApi(action, token, payload, options) {
       if (timeoutId) { clearTimeout(timeoutId); }
       throw err;
     });
+}
+
+function isPlaceholder(value) {
+  if (!value) { return false; }
+  return value.indexOf('__') === 0 && value.lastIndexOf('__') === value.length - 2;
 }

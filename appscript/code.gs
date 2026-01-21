@@ -1,33 +1,43 @@
 /*************** CONFIG CONSTANTS ***************/
 
-// Spreadsheet that holds Inventory, Rooms, History sheets.
-// Get this ID from the URL of the Google Sheet.
+const CONFIG_KEYS = {
+  SPREADSHEET_ID: 'INVENTORY_SPREADSHEET_ID',
+  IMAGE_FOLDER_ID: 'IMAGE_FOLDER_ID',
+  TIMEZONE: 'TIMEZONE',
+  GOOGLE_CLIENT_ID: 'GOOGLE_CLIENT_ID',
+  ADMIN_EMAILS: 'ADMIN_EMAILS'
+};
+
+// Defaults (used if Script Properties are missing)
 const INVENTORY_SPREADSHEET_ID = '19sVQejCQk76mcU7mTiF62OMJD4NWi3gQRLbmMUFfSOk';
-
-// Sheet names (tabs) in that spreadsheet
-const INVENTORY_SHEET_NAME = 'Inventory';
-const ROOMS_SHEET_NAME = 'Rooms';
-const HISTORY_SHEET_NAME = 'History';
-
-// Folder in the same Shared Drive where images are stored.
-// Get this ID from the Inventory Images folder URL.
 const IMAGE_FOLDER_ID = '10F37Nea16AD30jqYWQapXYUGxYL3Ynj8';
-
-// Timezone for timestamp formatting
 const TIMEZONE = 'Europe/Zurich';
-
-// Google OAuth client ID for SSO (Web application type)
 const GOOGLE_CLIENT_ID = '180993117826-pnc9bkd8fg3s29hu8ru612cqg0gmk3ld.apps.googleusercontent.com';
-
-// How many recent entries to return to the UI
-const RECENT_ENTRIES_LIMIT = 100;
-
-// Admin emails (full addresses in your Workspace domain)
 const ADMIN_EMAILS = [
   'ftimoshek@icsz.ch',
   'cvongunten@icsz.ch',
   'msalmonson@icsz.ch'
 ];
+
+// Sheet names (tabs) in the spreadsheet
+const INVENTORY_SHEET_NAME = 'Inventory';
+const ROOMS_SHEET_NAME = 'Rooms';
+const HISTORY_SHEET_NAME = 'History';
+
+// How many recent entries to return to the UI
+const RECENT_ENTRIES_LIMIT = 100;
+
+// Max image payload size (decoded bytes)
+const MAX_IMAGE_BYTES = 1200 * 1024;
+
+// Allowed MIME types for uploads
+const ALLOWED_IMAGE_TYPES = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp'
+};
 
 // Column indexes in the Inventory sheet (1-based)
 const COL = {
@@ -41,6 +51,54 @@ const COL = {
   USER_EMAIL: 8,
   DELETED: 9     // TRUE/FALSE for soft delete
 };
+
+var CONFIG_CACHE = null;
+
+function getConfig_() {
+  if (CONFIG_CACHE) {
+    return CONFIG_CACHE;
+  }
+  var props = PropertiesService.getScriptProperties();
+  var spreadsheetId = props.getProperty(CONFIG_KEYS.SPREADSHEET_ID) || INVENTORY_SPREADSHEET_ID;
+  var imageFolderId = props.getProperty(CONFIG_KEYS.IMAGE_FOLDER_ID) || IMAGE_FOLDER_ID;
+  var timezone = props.getProperty(CONFIG_KEYS.TIMEZONE) || TIMEZONE;
+  var googleClientId = props.getProperty(CONFIG_KEYS.GOOGLE_CLIENT_ID) || GOOGLE_CLIENT_ID;
+  var adminRaw = props.getProperty(CONFIG_KEYS.ADMIN_EMAILS) || ADMIN_EMAILS.join(',');
+  persistMissingConfig_(props, CONFIG_KEYS.SPREADSHEET_ID, spreadsheetId);
+  persistMissingConfig_(props, CONFIG_KEYS.IMAGE_FOLDER_ID, imageFolderId);
+  persistMissingConfig_(props, CONFIG_KEYS.TIMEZONE, timezone);
+  persistMissingConfig_(props, CONFIG_KEYS.GOOGLE_CLIENT_ID, googleClientId);
+  persistMissingConfig_(props, CONFIG_KEYS.ADMIN_EMAILS, adminRaw);
+  var adminEmails = adminRaw
+    .split(',')
+    .map(function (email) { return email.trim().toLowerCase(); })
+    .filter(function (email) { return !!email; });
+
+  if (!spreadsheetId) {
+    throw new Error('Missing script property: ' + CONFIG_KEYS.SPREADSHEET_ID);
+  }
+  if (!imageFolderId) {
+    throw new Error('Missing script property: ' + CONFIG_KEYS.IMAGE_FOLDER_ID);
+  }
+  if (!googleClientId) {
+    throw new Error('Missing script property: ' + CONFIG_KEYS.GOOGLE_CLIENT_ID);
+  }
+
+  CONFIG_CACHE = {
+    spreadsheetId: spreadsheetId,
+    imageFolderId: imageFolderId,
+    timezone: timezone,
+    googleClientId: googleClientId,
+    adminEmails: adminEmails
+  };
+  return CONFIG_CACHE;
+}
+
+function persistMissingConfig_(props, key, value) {
+  if (!props.getProperty(key) && value) {
+    props.setProperty(key, value);
+  }
+}
 
 
 /*************** ENTRY POINT (WEB APP) ***************/
@@ -309,7 +367,7 @@ function deleteEntry(idToken, entryId) {
 /*************** HELPERS: SHEETS & DATA ***************/
 
 function getSpreadsheet_() {
-  return SpreadsheetApp.openById(INVENTORY_SPREADSHEET_ID);
+  return SpreadsheetApp.openById(getConfig_().spreadsheetId);
 }
 
 function getSheetByName_(name) {
@@ -339,7 +397,7 @@ function verifyIdToken_(idToken) {
     throw new Error('Invalid authentication token.');
   }
   var payload = JSON.parse(response.getContentText() || '{}');
-  if (payload.aud !== GOOGLE_CLIENT_ID) {
+  if (payload.aud !== getConfig_().googleClientId) {
     throw new Error('Authentication token client mismatch.');
   }
   var emailVerified = payload.email_verified === true || payload.email_verified === 'true';
@@ -358,7 +416,8 @@ function buildJsonResponse_(obj) {
 }
 
 function isAdmin_(email) {
-  return ADMIN_EMAILS.indexOf(email) !== -1;
+  var target = (email || '').toLowerCase();
+  return getConfig_().adminEmails.indexOf(target) !== -1;
 }
 
 /**
@@ -468,7 +527,7 @@ function formatDate_(value) {
     return '';
   }
   var date = (value instanceof Date) ? value : new Date(value);
-  return Utilities.formatDate(date, TIMEZONE, 'yyyy-MM-dd HH:mm:ss');
+  return Utilities.formatDate(date, getConfig_().timezone, 'yyyy-MM-dd HH:mm:ss');
 }
 
 
@@ -486,12 +545,19 @@ function saveImageToDrive_(imageDataUrl, entryId) {
     }
     var contentType = matches[1];
     var base64Data = matches[2];
+    var extension = getExtensionForContentType_(contentType);
+    if (!extension) {
+      throw new Error('Unsupported image type.');
+    }
+    var estimatedBytes = Math.floor((base64Data.length * 3) / 4);
+    if (estimatedBytes > MAX_IMAGE_BYTES) {
+      throw new Error('Image too large. Max ' + MAX_IMAGE_BYTES + ' bytes.');
+    }
 
     var bytes = Utilities.base64Decode(base64Data);
-    var extension = getExtensionForContentType_(contentType);
     var blob = Utilities.newBlob(bytes, contentType, 'inventory_' + entryId + '.' + extension);
 
-    var folder = DriveApp.getFolderById(IMAGE_FOLDER_ID);
+    var folder = DriveApp.getFolderById(getConfig_().imageFolderId);
     var file = folder.createFile(blob);
 
     // Make sure domain users can view the image via link
@@ -504,11 +570,8 @@ function saveImageToDrive_(imageDataUrl, entryId) {
 }
 
 function getExtensionForContentType_(contentType) {
-  if (!contentType) return 'png';
-  if (contentType === 'image/jpeg' || contentType === 'image/jpg') return 'jpg';
-  if (contentType === 'image/png') return 'png';
-  if (contentType === 'image/gif') return 'gif';
-  return 'png';
+  if (!contentType) return '';
+  return ALLOWED_IMAGE_TYPES[contentType] || '';
 }
 
 

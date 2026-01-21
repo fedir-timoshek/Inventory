@@ -8,6 +8,7 @@ import { refreshEntriesFromServer } from './entries.js';
 
 var syncInProgress = false;
 var syncQueued = false;
+var storageErrorNotified = false;
 
 export function loadOfflineQueue() {
   appState.offlineQueue = [];
@@ -144,7 +145,12 @@ function saveOfflineQueue() {
     if (!window.localStorage) { return; }
     var json = JSON.stringify(appState.offlineQueue || []);
     localStorage.setItem(OFFLINE_QUEUE_KEY, json);
-  } catch (e) {}
+  } catch (e) {
+    if (!storageErrorNotified) {
+      storageErrorNotified = true;
+      showToast('Offline queue could not be saved. Clear storage or reduce image size.', 'error');
+    }
+  }
 }
 
 function buildLocalId(entry, index) {

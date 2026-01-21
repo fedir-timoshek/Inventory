@@ -2,9 +2,13 @@
   "name": "inventory-web-app",
   "private": true,
   "scripts": {
-    "build": "node scripts/build.mjs"
+    "build": "node scripts/build.mjs",
+    "lint": "eslint \"web/**/*.js\" \"scripts/**/*.mjs\""
   },
   "devDependencies": {
-    "esbuild": "^0.20.2"
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
+    "esbuild": "^0.27.2",
+    "globals": "^17.0.0"
   }
 }

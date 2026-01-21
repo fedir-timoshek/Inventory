@@ -42,7 +42,7 @@ async function buildAssets() {
   });
 
   const srcIndex = await readFile('web/index.html', 'utf8');
-  const outIndex = srcIndex
+  const outIndex = replaceConfigPlaceholders(srcIndex)
     .replace('href="styles.css"', 'href="styles.min.css"')
     .replace(/<script\s+src="app\.js"[^>]*><\/script>/, '<script src="app.min.js"></script>');
   await writeFile(join(outDir, 'index.html'), outIndex);
@@ -50,6 +50,22 @@ async function buildAssets() {
   if (existsSync('web/assets')) {
     await copyDir('web/assets', join(outDir, 'assets'));
   }
+}
+
+function replaceConfigPlaceholders(source) {
+  const apiUrl = readRequiredEnv('API_URL');
+  const googleClientId = readRequiredEnv('GOOGLE_CLIENT_ID');
+  return source
+    .replace('__API_URL__', apiUrl)
+    .replace('__GOOGLE_CLIENT_ID__', googleClientId);
+}
+
+function readRequiredEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value.trim();
 }
 
 buildAssets().catch((err) => {

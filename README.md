@@ -35,12 +35,12 @@ Other tabs:
 2) Insert the `Quantity` column between `Room` and `Notes` (column E). This shifts Notes to F, Image URL to G, User Email to H, Deleted to I.
 3) Fill column E (`Quantity`) with `1` for existing rows.
 4) Open Apps Script and replace the project code with `appscript/code.gs`.
-5) Update the constants at the top of `appscript/code.gs`:
+5) Set Script Properties (Apps Script -> Project Settings -> Script properties):
    - `INVENTORY_SPREADSHEET_ID`
    - `IMAGE_FOLDER_ID`
    - `TIMEZONE`
    - `GOOGLE_CLIENT_ID`
-   - `ADMIN_EMAILS`
+   - `ADMIN_EMAILS` (comma-separated list)
 6) Deploy the Apps Script as a Web App:
    - Deploy -> New deployment -> Web app
    - Execute as: Me
@@ -56,27 +56,32 @@ Other tabs:
 3) Copy the Client ID for the frontend.
 
 ## Frontend setup
-1) Update `web/index.html` meta tags:
-   - `meta[name="api-url"]` -> Apps Script Web App URL
-   - `meta[name="google-client-id"]` -> OAuth Client ID
+1) Set build-time environment variables:
+   - `API_URL` -> Apps Script Web App URL
+   - `GOOGLE_CLIENT_ID` -> OAuth Client ID
+2) Run `npm run build` to generate `web/dist/index.html` with those values.
 
 ## Deploy to GitHub Pages (recommended)
 1) In GitHub: Settings -> Pages -> Source: **GitHub Actions**.
 2) The workflow builds and deploys `web/dist` on every push to `main`.
 3) No need to commit `web/dist` manually.
+4) Set repository secrets for the workflow:
+   - `API_URL`
+   - `GOOGLE_CLIENT_ID`
 
 ## Build locally (optional)
 ```bash
-npm install
+export API_URL="https://script.google.com/macros/s/..."
+export GOOGLE_CLIENT_ID="your-oauth-client-id.apps.googleusercontent.com"
+npm ci
 npm run build
 ```
 - This generates `web/dist` with bundled/minified `app.min.js` and `styles.min.css`.
-- If you add a `package-lock.json`, you can switch to `npm ci` and enable npm caching in the workflow.
 
 ## Local development
 Open the app via a local server (not via `file://`), otherwise module scripts will fail.
 ```bash
-cd web
+cd web/dist
 python3 -m http.server
 ```
 Then open `http://localhost:8000`.

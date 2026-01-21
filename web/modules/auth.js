@@ -4,9 +4,11 @@ import { callApi, getGoogleClientId, hasServer } from './api.js';
 import { showToast } from './toast.js';
 
 var authHandlers = {};
+var MAX_GSI_ATTEMPTS = 80;
 
 export function initAuth(handlers) {
   authHandlers = handlers || {};
+  clearLegacyToken();
   showLoadingScreen(true, 'Checking session...');
   showAuthScreen(false);
   waitForGsi(0);
@@ -69,20 +71,23 @@ function showAuthError(message) {
 function setAuthToken(token) {
   appState.authToken = token || '';
   try {
-    if (window.localStorage) {
+    var storage = getAuthStorage();
+    if (storage) {
       if (appState.authToken) {
-        localStorage.setItem(AUTH_TOKEN_KEY, appState.authToken);
+        storage.setItem(AUTH_TOKEN_KEY, appState.authToken);
       } else {
-        localStorage.removeItem(AUTH_TOKEN_KEY);
+        storage.removeItem(AUTH_TOKEN_KEY);
       }
     }
+    clearLegacyToken();
   } catch (e) {}
 }
 
 function loadStoredToken() {
   try {
-    if (!window.localStorage) { return ''; }
-    return localStorage.getItem(AUTH_TOKEN_KEY) || '';
+    var storage = getAuthStorage();
+    if (!storage) { return ''; }
+    return storage.getItem(AUTH_TOKEN_KEY) || '';
   } catch (e) {
     return '';
   }
@@ -100,13 +105,26 @@ function waitForGsi(attempts) {
     initializeGsi(clientId);
     return;
   }
-  if (attempts >= 20) {
+  if (attempts >= MAX_GSI_ATTEMPTS) {
     showAuthError('Google sign-in library failed to load.');
     showLoadingScreen(false);
     showAuthScreen(true);
     return;
   }
   setTimeout(function () { waitForGsi(attempts + 1); }, 250);
+}
+
+function getAuthStorage() {
+  try {
+    if (window.sessionStorage) { return window.sessionStorage; }
+  } catch (e) {}
+  return null;
+}
+
+function clearLegacyToken() {
+  try {
+    if (window.localStorage) { localStorage.removeItem(AUTH_TOKEN_KEY); }
+  } catch (e) {}
 }
 
 function initializeGsi(clientId) {
