@@ -3,6 +3,7 @@ import { dom } from './dom.js';
 import { callApi, hasServer } from './api.js';
 import { ensureAuth } from './auth.js';
 import { showToast } from './toast.js';
+import { generateUuid } from './utils.js';
 import { refreshEntriesFromServer } from './entries.js';
 
 var syncInProgress = false;
@@ -20,6 +21,10 @@ export function loadOfflineQueue() {
       for (var i = 0; i < parsed.length; i++) {
         if (!parsed[i].localId) {
           parsed[i].localId = buildLocalId(parsed[i], i);
+          needsSave = true;
+        }
+        if (!parsed[i].clientEntryId) {
+          parsed[i].clientEntryId = parsed[i].id || generateUuid();
           needsSave = true;
         }
         if (parsed[i].quantity === undefined || parsed[i].quantity === null || parsed[i].quantity === '') {
@@ -41,6 +46,7 @@ export function enqueueOfflineEntry(payload) {
   var createdAt = new Date().toISOString();
   var entry = {
     localId: buildLocalId({ createdAt: createdAt }),
+    clientEntryId: payload.clientEntryId || generateUuid(),
     barcode: payload.barcode,
     room: payload.room,
     notes: payload.notes || '',
@@ -102,7 +108,24 @@ export function syncOfflineQueue() {
     }
     var item = items[index];
     index++;
-    callApi('saveEntry', appState.authToken, item)
+    var payload = {
+      barcode: item.barcode,
+      room: item.room,
+      notes: item.notes || '',
+      quantity: item.quantity || 1,
+      clientEntryId: item.clientEntryId || item.id
+    };
+    callApi('saveEntry', appState.authToken, payload, { timeoutMs: 15000 })
+      .then(function (entry) {
+        if (item.imageDataUrl) {
+          return callApi('uploadEntryImage', appState.authToken, {
+            id: entry && entry.id ? entry.id : payload.clientEntryId,
+            imageDataUrl: item.imageDataUrl
+          }, { timeoutMs: 20000 })
+            .then(function () { return entry; });
+        }
+        return entry;
+      })
       .then(function () {
         successCount++;
         processNext();

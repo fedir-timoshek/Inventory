@@ -6,7 +6,7 @@ import { showToast } from './toast.js';
 import { enqueueOfflineEntry } from './offline.js';
 import { applyFilterAndRender } from './entries.js';
 import { clearSelectedImage } from './images.js';
-import { triggerVibrate } from './utils.js';
+import { generateUuid, triggerVibrate } from './utils.js';
 
 export function clearForm() {
   dom.inputBarcode.value = '';
@@ -46,6 +46,7 @@ export function saveCurrentItem() {
   var notes = (dom.inputNotes.value || '').toString().trim();
   var quantity = getQuantityValue();
   var imageDataUrl = appState.selectedImageDataUrl || '';
+  var clientEntryId = generateUuid();
 
   if (!barcode) {
     showToast('Please scan or type a barcode.', 'error');
@@ -64,14 +65,16 @@ export function saveCurrentItem() {
     barcode: barcode,
     room: room,
     notes: notes,
-    quantity: quantity
+    quantity: quantity,
+    clientEntryId: clientEntryId
   };
   var offlinePayload = {
     barcode: barcode,
     room: room,
     notes: notes,
     quantity: quantity,
-    imageDataUrl: imageDataUrl
+    imageDataUrl: imageDataUrl,
+    clientEntryId: clientEntryId
   };
   if (!hasServer()) {
     showToast('Cannot save without API access.', 'error');
@@ -81,7 +84,7 @@ export function saveCurrentItem() {
   dom.btnSaveItem.disabled = true;
   dom.btnSaveItem.textContent = 'Saving…';
 
-  callApi('saveEntry', appState.authToken, payload)
+  callApi('saveEntry', appState.authToken, payload, { timeoutMs: 15000 })
     .then(function (entry) {
       dom.btnSaveItem.disabled = false;
       dom.btnSaveItem.textContent = '💾 Save item';
@@ -92,32 +95,36 @@ export function saveCurrentItem() {
         applyFilterAndRender();
       }
       if (entry && entry.id && imageDataUrl) {
-        uploadEntryImage(entry.id, imageDataUrl);
+        uploadEntryImage(entry.id, imageDataUrl, offlinePayload);
       }
       dom.inputBarcode.value = '';
       dom.inputNotes.value = '';
       setQuantityValue(1);
       clearSelectedImage();
     })
-    .catch(function () {
+    .catch(function (err) {
       dom.btnSaveItem.disabled = false;
       dom.btnSaveItem.textContent = '💾 Save item';
-      enqueueOfflineEntry(offlinePayload);
-      showToast('Saved locally; will sync when back online.', 'info');
-      dom.inputBarcode.value = '';
-      dom.inputNotes.value = '';
-      setQuantityValue(1);
-      clearSelectedImage();
+      if (shouldQueueNetworkError(err)) {
+        enqueueOfflineEntry(offlinePayload);
+        showToast('Saved locally; will sync when back online.', 'info');
+        dom.inputBarcode.value = '';
+        dom.inputNotes.value = '';
+        setQuantityValue(1);
+        clearSelectedImage();
+      } else {
+        showToast('Save failed. ' + (err && err.message ? err.message : ''), 'error');
+      }
     });
 }
 
-function uploadEntryImage(entryId, imageDataUrl) {
+function uploadEntryImage(entryId, imageDataUrl, fallbackPayload) {
   if (!entryId || !imageDataUrl) { return; }
   showToast('Uploading photo...', 'info');
   callApi('uploadEntryImage', appState.authToken, {
     id: entryId,
     imageDataUrl: imageDataUrl
-  })
+  }, { timeoutMs: 20000 })
     .then(function (updatedEntry) {
       if (updatedEntry && updatedEntry.id) {
         updateEntryImageInState(updatedEntry);
@@ -126,7 +133,12 @@ function uploadEntryImage(entryId, imageDataUrl) {
     })
     .catch(function (err) {
       console.log('uploadEntryImage error:', err);
-      showToast('Photo upload failed. Try again later.', 'error');
+      if (shouldQueueNetworkError(err) && fallbackPayload) {
+        enqueueOfflineEntry(fallbackPayload);
+        showToast('Photo queued; will sync when online.', 'info');
+      } else {
+        showToast('Photo upload failed. Try again later.', 'error');
+      }
     });
 }
 
@@ -140,4 +152,15 @@ function updateEntryImageInState(updatedEntry) {
       return;
     }
   }
+}
+
+function shouldQueueNetworkError(err) {
+  if (!err) { return true; }
+  if (err.name === 'AbortError') { return true; }
+  var message = (err.message || '').toLowerCase();
+  if (!message) { return true; }
+  if (message.indexOf('timed out') > -1) { return true; }
+  if (message.indexOf('failed to fetch') > -1) { return true; }
+  if (message.indexOf('network') > -1) { return true; }
+  return false;
 }

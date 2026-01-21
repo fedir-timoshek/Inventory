@@ -25,7 +25,8 @@ const RECENT_ENTRIES_LIMIT = 100;
 // Admin emails (full addresses in your Workspace domain)
 const ADMIN_EMAILS = [
   'ftimoshek@icsz.ch',
-  'ftimoshek@icsz.ch'
+  'cvongunten@icsz.ch',
+  'msalmonson@icsz.ch'
 ];
 
 // Column indexes in the Inventory sheet (1-based)
@@ -134,9 +135,19 @@ function saveEntry(idToken, formData) {
     throw new Error('Room is required.');
   }
 
-  var id = Utilities.getUuid();
+  var clientEntryId = (formData && formData.clientEntryId) ? formData.clientEntryId.toString() : '';
+  var id = clientEntryId || Utilities.getUuid();
   var now = new Date();
   var imageUrl = '';
+
+  if (clientEntryId) {
+    var existingRowIndex = findRowById_(sheet, id);
+    if (existingRowIndex !== -1) {
+      var existingLastCol = Math.max(sheet.getLastColumn(), COL.DELETED);
+      var existingRow = sheet.getRange(existingRowIndex, 1, 1, existingLastCol).getValues()[0];
+      return rowToEntryObject_(existingRow);
+    }
+  }
 
   if (formData && formData.imageDataUrl) {
     imageUrl = saveImageToDrive_(formData.imageDataUrl, id);

@@ -19,15 +19,19 @@ export function hasServer() {
   return !!(APP_CONFIG.apiUrl && APP_CONFIG.apiUrl.indexOf('http') === 0);
 }
 
-export function callApi(action, token, payload) {
+export function callApi(action, token, payload, options) {
   if (!hasServer()) {
     return Promise.reject(new Error('Missing API URL.'));
   }
+  options = options || {};
+  var timeoutMs = (typeof options.timeoutMs === 'number') ? options.timeoutMs : 15000;
+  var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
   var body = JSON.stringify({ action: action, token: token || '', payload: payload || {} });
-  return fetch(APP_CONFIG.apiUrl, {
+  var fetchPromise = fetch(APP_CONFIG.apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: body
+    body: body,
+    signal: controller ? controller.signal : undefined
   })
     .then(function (res) {
       var contentType = res.headers.get('content-type') || '';
@@ -44,5 +48,33 @@ export function callApi(action, token, payload) {
         throw new Error(json && json.error ? json.error : 'API error');
       }
       return json.data;
+    })
+    .catch(function (err) {
+      if (err && err.name === 'AbortError') {
+        throw new Error('Request timed out.');
+      }
+      throw err;
+    });
+
+  if (!timeoutMs || timeoutMs <= 0) {
+    return fetchPromise;
+  }
+
+  var timeoutId = null;
+  var timeoutPromise = new Promise(function (resolve, reject) {
+    timeoutId = setTimeout(function () {
+      if (controller) { controller.abort(); }
+      reject(new Error('Request timed out.'));
+    }, timeoutMs);
+  });
+
+  return Promise.race([fetchPromise, timeoutPromise])
+    .then(function (data) {
+      if (timeoutId) { clearTimeout(timeoutId); }
+      return data;
+    })
+    .catch(function (err) {
+      if (timeoutId) { clearTimeout(timeoutId); }
+      throw err;
     });
 }
