@@ -687,6 +687,7 @@ function createScanSession_() {
     highResInFlight: false,
     zoomApplied: false,
     zoomValue: 0,
+    autoZoomEnabled: false,
     zoomStepIndex: 0,
     fastIntervalMs: 100,
     farEveryMs: 350,
@@ -727,6 +728,7 @@ function resetScanSession_() {
   scanSession.highResInFlight = false;
   scanSession.zoomApplied = false;
   scanSession.zoomValue = 0;
+  scanSession.autoZoomEnabled = false;
   scanSession.zoomStepIndex = 0;
   scanSession.resolutionEscalated = false;
 }
@@ -802,6 +804,7 @@ function maybeShowScanHint_() {
 
 function maybeApplyAutoZoom_() {
   if (!isBalancedProfile_()) { return; }
+  if (!scanSession.autoZoomEnabled) { return; }
   if (!scanSession.activeTrack) { return; }
   var now = getNowMs_();
   var sinceSuccess = scanSession.lastSuccessTs ? (now - scanSession.lastSuccessTs) : (now - scanSession.startedAt);
