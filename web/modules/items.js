@@ -161,6 +161,13 @@ function shouldQueueNetworkError(err) {
     }
   } catch (e) {}
   if (!err) { return true; }
+  if (err.isNetworkError) { return true; }
+  if (typeof err.status !== 'number') { return true; }
+  if (typeof err.status === 'number') {
+    if (err.status === 0) { return true; }
+    if (err.status >= 500) { return true; }
+    if (err.status === 408) { return true; }
+  }
   if (err.name === 'AbortError') { return true; }
   if (err.name === 'TypeError') { return true; }
   var message = (err.message || '').toLowerCase();

@@ -34,24 +34,42 @@ export function callApi(action, token, payload, options) {
     signal: controller ? controller.signal : undefined
   })
     .then(function (res) {
-      var contentType = res.headers.get('content-type') || '';
-      if (contentType.indexOf('application/json') === -1) {
-        return res.text().then(function (text) {
+      return res.text().then(function (text) {
+        var contentType = res.headers.get('content-type') || '';
+        if (contentType.indexOf('application/json') === -1) {
           var snippet = (text || '').replace(/\s+/g, ' ').slice(0, 180);
-          throw new Error('API response is not JSON. Check Web App access. ' + snippet);
-        });
-      }
-      return res.json();
-    })
-    .then(function (json) {
-      if (!json || json.ok !== true) {
-        throw new Error(json && json.error ? json.error : 'API error');
-      }
-      return json.data;
+          var typeErr = new Error('API response is not JSON. Check Web App access. ' + snippet);
+          typeErr.status = res.status;
+          typeErr.responseText = text || '';
+          throw typeErr;
+        }
+        var json;
+        try {
+          json = JSON.parse(text || '{}');
+        } catch (parseErr) {
+          var parseError = new Error('API response parse error.');
+          parseError.status = res.status;
+          parseError.responseText = text || '';
+          throw parseError;
+        }
+        if (!json || json.ok !== true) {
+          var apiErr = new Error(json && json.error ? json.error : 'API error');
+          apiErr.status = res.status;
+          throw apiErr;
+        }
+        return json.data;
+      });
     })
     .catch(function (err) {
       if (err && err.name === 'AbortError') {
-        throw new Error('Request timed out.');
+        var timeoutError = new Error('Request timed out.');
+        timeoutError.isNetworkError = true;
+        timeoutError.status = 0;
+        throw timeoutError;
+      }
+      if (err && err.name === 'TypeError') {
+        err.isNetworkError = true;
+        if (typeof err.status !== 'number') { err.status = 0; }
       }
       throw err;
     });
@@ -64,7 +82,10 @@ export function callApi(action, token, payload, options) {
   var timeoutPromise = new Promise(function (resolve, reject) {
     timeoutId = setTimeout(function () {
       if (controller) { controller.abort(); }
-      reject(new Error('Request timed out.'));
+      var timeoutError = new Error('Request timed out.');
+      timeoutError.isNetworkError = true;
+      timeoutError.status = 0;
+      reject(timeoutError);
     }, timeoutMs);
   });
 
