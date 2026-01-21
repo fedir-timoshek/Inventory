@@ -393,6 +393,41 @@ function runBarcodeDetectLoop(timestamp) {
   }
   scannerState.barcodeDetectBusy = true;
   scannerState.barcodeDetectLastTs = nowTs;
+  if (shouldUseHighResCapture_()) {
+    captureHighResFrame_()
+      .then(function (frame) {
+        var source = getBarcodeDetectSource_(frame || dom.video);
+        return scannerState.barcodeDetector.detect(source)
+          .then(function (barcodes) {
+            if (!appState.scanning) { return; }
+            if (barcodes && barcodes.length) {
+              recordScanResult_(true);
+              var value = getBarcodeValue(barcodes[0]);
+              onBarcodeDetected(value);
+            } else {
+              recordScanResult_(false);
+            }
+          })
+          .catch(function () {
+            recordScanResult_(false);
+          })
+          .finally(function () {
+            if (frame && typeof frame.close === 'function') {
+              try { frame.close(); } catch (e) {}
+            }
+          });
+      })
+      .catch(function () {
+        recordScanResult_(false);
+      })
+      .finally(function () {
+        scannerState.barcodeDetectBusy = false;
+        if (appState.scanning) {
+          scheduleNextBarcodeDetect_();
+        }
+      });
+    return;
+  }
   var source = getBarcodeDetectSource_(dom.video);
   scannerState.barcodeDetector.detect(source)
     .then(function (barcodes) {
@@ -597,7 +632,7 @@ function focusRoomField() {
 }
 
 function readScanConfig_() {
-  var config = { scanDebug: false, scanEngine: 'auto', scanProfile: 'legacy' };
+  var config = { scanDebug: false, scanEngine: 'auto', scanProfile: 'balanced' };
   try {
     if (typeof window === 'undefined' || !window.location) { return config; }
     var params = new URLSearchParams(window.location.search);
@@ -637,39 +672,63 @@ function createScanDebug_() {
 
 function createScanSession_() {
   return {
-    profile: scanConfig && scanConfig.scanProfile ? scanConfig.scanProfile : 'legacy',
+    profile: scanConfig && scanConfig.scanProfile ? scanConfig.scanProfile : 'balanced',
     startedAt: 0,
     lastSuccessTs: 0,
     noSuccessStartTs: 0,
     lastHintTs: 0,
     lastFarTs: 0,
+    lastHighResTs: 0,
+    farScaleIndex: 0,
     trackConfigured: false,
     activeTrack: null,
+    imageCapture: null,
+    imageCaptureTrack: null,
+    highResInFlight: false,
     zoomApplied: false,
     zoomValue: 0,
-    fastIntervalMs: 120,
-    farEveryMs: 400,
+    zoomStepIndex: 0,
+    fastIntervalMs: 100,
+    farEveryMs: 350,
+    forceFarAfterMs: 700,
     fastRoi: { widthRatio: 0.6, heightRatio: 0.45 },
-    farRoi: { widthRatio: 0.9, heightRatio: 0.7 },
+    farRoi: { widthRatio: 1, heightRatio: 0.85 },
     fastMaxWidth: 640,
-    farMaxWidth: 1600,
+    farMaxWidth: 1920,
     fastScaleUp: 1,
     farScaleUp: 1.4,
-    autoZoomDelayMs: 1800
+    farScaleSteps: [1.4, 1.8],
+    farFilter: 'contrast(1.2) brightness(1.08)',
+    highResEveryMs: 650,
+    highResAfterMs: 500,
+    autoZoomDelayMs: 1500,
+    zoomStepEveryMs: 1000,
+    zoomSteps: [0.35, 0.55, 0.7],
+    resolutionEscalated: false,
+    resolutionEscalateAfterMs: 900,
+    targetHighResWidth: 1920,
+    targetHighResHeight: 1080
   };
 }
 
 function resetScanSession_() {
-  scanSession.profile = scanConfig && scanConfig.scanProfile ? scanConfig.scanProfile : 'legacy';
+  scanSession.profile = scanConfig && scanConfig.scanProfile ? scanConfig.scanProfile : 'balanced';
   scanSession.startedAt = getNowMs_();
   scanSession.lastSuccessTs = 0;
   scanSession.noSuccessStartTs = 0;
   scanSession.lastHintTs = 0;
   scanSession.lastFarTs = 0;
+  scanSession.lastHighResTs = 0;
+  scanSession.farScaleIndex = 0;
   scanSession.trackConfigured = false;
   scanSession.activeTrack = null;
+  scanSession.imageCapture = null;
+  scanSession.imageCaptureTrack = null;
+  scanSession.highResInFlight = false;
   scanSession.zoomApplied = false;
   scanSession.zoomValue = 0;
+  scanSession.zoomStepIndex = 0;
+  scanSession.resolutionEscalated = false;
 }
 
 function beginScanSession_() {
@@ -721,6 +780,7 @@ function recordScanResult_(success) {
   } else if (!scanSession.noSuccessStartTs) {
     scanSession.noSuccessStartTs = now;
   }
+  maybeEscalateResolution_();
   maybeApplyAutoZoom_();
   maybeShowScanHint_();
   recordDecodeAttempt_(success);
@@ -742,18 +802,23 @@ function maybeShowScanHint_() {
 
 function maybeApplyAutoZoom_() {
   if (!isBalancedProfile_()) { return; }
-  if (scanSession.zoomApplied) { return; }
   if (!scanSession.activeTrack) { return; }
   var now = getNowMs_();
   var sinceSuccess = scanSession.lastSuccessTs ? (now - scanSession.lastSuccessTs) : (now - scanSession.startedAt);
-  if (sinceSuccess < scanSession.autoZoomDelayMs) { return; }
+  var stepIndex = scanSession.zoomStepIndex || 0;
+  if (!scanSession.zoomSteps || !scanSession.zoomSteps.length) { return; }
+  if (stepIndex >= scanSession.zoomSteps.length) { return; }
+  var stepDelay = scanSession.autoZoomDelayMs + (stepIndex * scanSession.zoomStepEveryMs);
+  if (sinceSuccess < stepDelay) { return; }
   var caps = getTrackCapabilities_(scanSession.activeTrack);
   if (!caps || !caps.zoom) { return; }
-  var desired = caps.zoom.min + (caps.zoom.max - caps.zoom.min) * 0.35;
+  var ratio = scanSession.zoomSteps[stepIndex];
+  var desired = caps.zoom.min + (caps.zoom.max - caps.zoom.min) * ratio;
   desired = alignToStep_(desired, caps.zoom.step);
   applyTrackConstraints_(scanSession.activeTrack, { zoom: desired });
   scanSession.zoomApplied = true;
   scanSession.zoomValue = desired;
+  scanSession.zoomStepIndex = stepIndex + 1;
 }
 
 function resetAutoZoom_(reason) {
@@ -765,6 +830,7 @@ function resetAutoZoom_(reason) {
   applyTrackConstraints_(scanSession.activeTrack, { zoom: desired });
   scanSession.zoomApplied = false;
   scanSession.zoomValue = desired;
+  scanSession.zoomStepIndex = 0;
   if (scanDebug.enabled) {
     console.log('[scanDebug] zoom reset', reason || '');
   }
@@ -841,6 +907,7 @@ function configureTrackForScanning_(track) {
   if (!isBalancedProfile_()) { return; }
   if (scanSession.trackConfigured) { return; }
   scanSession.trackConfigured = true;
+  ensureImageCapture_(track);
   var caps = getTrackCapabilities_(track);
   if (!caps) { return; }
   var constraints = {};
@@ -887,6 +954,76 @@ function alignToStep_(value, step) {
   return Math.round(value / step) * step;
 }
 
+function ensureImageCapture_(track) {
+  if (!isBalancedProfile_()) { return; }
+  if (!track || typeof window === 'undefined' || typeof window.ImageCapture !== 'function') { return; }
+  if (scanSession.imageCapture && scanSession.imageCaptureTrack === track) { return; }
+  try {
+    scanSession.imageCapture = new ImageCapture(track);
+    scanSession.imageCaptureTrack = track;
+  } catch (e) {
+    scanSession.imageCapture = null;
+    scanSession.imageCaptureTrack = null;
+  }
+}
+
+function shouldUseHighResCapture_() {
+  if (!isBalancedProfile_()) { return false; }
+  if (!scanSession.imageCapture || typeof scanSession.imageCapture.grabFrame !== 'function') { return false; }
+  if (scanSession.highResInFlight) { return false; }
+  var now = getNowMs_();
+  if (now - scanSession.lastHighResTs < scanSession.highResEveryMs) { return false; }
+  if (!scanSession.noSuccessStartTs) { return false; }
+  if (now - scanSession.noSuccessStartTs < scanSession.highResAfterMs) { return false; }
+  return true;
+}
+
+function captureHighResFrame_() {
+  if (!scanSession.imageCapture || typeof scanSession.imageCapture.grabFrame !== 'function') {
+    return Promise.reject(new Error('ImageCapture not available.'));
+  }
+  scanSession.highResInFlight = true;
+  scanSession.lastHighResTs = getNowMs_();
+  return scanSession.imageCapture.grabFrame()
+    .finally(function () {
+      scanSession.highResInFlight = false;
+    });
+}
+
+function maybeEscalateResolution_() {
+  if (!isBalancedProfile_()) { return; }
+  if (!scanSession.activeTrack) { return; }
+  if (scanSession.resolutionEscalated) { return; }
+  var now = getNowMs_();
+  var sinceSuccess = scanSession.lastSuccessTs ? (now - scanSession.lastSuccessTs) : (now - scanSession.startedAt);
+  if (sinceSuccess < scanSession.resolutionEscalateAfterMs) { return; }
+  var caps = getTrackCapabilities_(scanSession.activeTrack);
+  if (!caps || (!caps.width && !caps.height)) { return; }
+  var targetW = clampCapValue_(scanSession.targetHighResWidth, caps.width);
+  var targetH = clampCapValue_(scanSession.targetHighResHeight, caps.height);
+  if (!targetW && !targetH) { return; }
+  applyResolutionConstraints_(scanSession.activeTrack, targetW, targetH);
+  scanSession.resolutionEscalated = true;
+}
+
+function applyResolutionConstraints_(track, width, height) {
+  if (!track || typeof track.applyConstraints !== 'function') { return; }
+  var constraints = {};
+  if (width) { constraints.width = { ideal: width }; }
+  if (height) { constraints.height = { ideal: height }; }
+  if (!Object.keys(constraints).length) { return; }
+  try {
+    track.applyConstraints(constraints).catch(function () {});
+  } catch (e) {}
+}
+
+function clampCapValue_(value, cap) {
+  if (!cap || typeof cap.min !== 'number' || typeof cap.max !== 'number') {
+    return value;
+  }
+  return Math.min(cap.max, Math.max(cap.min, value));
+}
+
 function shouldUseVideoFrameCallback_() {
   return isBalancedProfile_() && dom.video && typeof dom.video.requestVideoFrameCallback === 'function';
 }
@@ -906,17 +1043,23 @@ function getDetectIntervalMs_() {
   return scannerState.barcodeDetectIntervalMs;
 }
 
-function getBarcodeDetectSource_(video) {
-  if (!isBalancedProfile_() || !video || !video.videoWidth || !video.videoHeight) {
-    return video;
+function getBarcodeDetectSource_(source) {
+  if (!isBalancedProfile_() || !source) {
+    return source;
   }
-  var pass = getScanPass_(video.videoWidth, video.videoHeight);
-  if (!pass || !pass.roi || !pass.target) { return video; }
+  var dims = getSourceDimensions_(source);
+  if (!dims.width || !dims.height) {
+    return source;
+  }
+  var pass = getScanPass_(dims.width, dims.height);
+  if (!pass || !pass.roi || !pass.target) { return source; }
   var canvasInfo = ensureBarcodeCanvas_(pass.target.width, pass.target.height);
   var ctx = canvasInfo.ctx;
   ctx.imageSmoothingEnabled = true;
   if (ctx.imageSmoothingQuality) { ctx.imageSmoothingQuality = 'high'; }
-  ctx.drawImage(video, pass.roi.sx, pass.roi.sy, pass.roi.sw, pass.roi.sh, 0, 0, pass.target.width, pass.target.height);
+  applyScanFilter_(ctx, pass);
+  ctx.drawImage(source, pass.roi.sx, pass.roi.sy, pass.roi.sw, pass.roi.sh, 0, 0, pass.target.width, pass.target.height);
+  clearScanFilter_(ctx);
   return canvasInfo.canvas;
 }
 
@@ -937,12 +1080,13 @@ function ensureBarcodeCanvas_(width, height) {
 function getScanPass_(videoW, videoH) {
   if (!isBalancedProfile_()) { return null; }
   var now = getNowMs_();
-  var useFar = (now - scanSession.lastFarTs) >= scanSession.farEveryMs;
+  var forceFar = scanSession.noSuccessStartTs && (now - scanSession.noSuccessStartTs) >= scanSession.forceFarAfterMs;
+  var useFar = forceFar || (now - scanSession.lastFarTs) >= scanSession.farEveryMs;
   var roiConfig = useFar ? scanSession.farRoi : scanSession.fastRoi;
   if (useFar) { scanSession.lastFarTs = now; }
   var roi = computeCenteredRoi_(videoW, videoH, roiConfig.widthRatio, roiConfig.heightRatio);
   var maxWidth = useFar ? scanSession.farMaxWidth : scanSession.fastMaxWidth;
-  var scaleUp = useFar ? scanSession.farScaleUp : scanSession.fastScaleUp;
+  var scaleUp = useFar ? getFarScaleUp_() : scanSession.fastScaleUp;
   var target = getTargetSize_(roi.sw, roi.sh, maxWidth, scaleUp);
   return { mode: useFar ? 'far' : 'fast', roi: roi, target: target };
 }
@@ -953,6 +1097,44 @@ function computeCenteredRoi_(videoW, videoH, widthRatio, heightRatio) {
   var sx = Math.max(0, Math.floor((videoW - sw) / 2));
   var sy = Math.max(0, Math.floor((videoH - sh) / 2));
   return { sx: sx, sy: sy, sw: sw, sh: sh };
+}
+
+function getFarScaleUp_() {
+  if (scanSession.farScaleSteps && scanSession.farScaleSteps.length) {
+    var idx = scanSession.farScaleIndex || 0;
+    var value = scanSession.farScaleSteps[idx % scanSession.farScaleSteps.length];
+    scanSession.farScaleIndex = idx + 1;
+    return value;
+  }
+  return scanSession.farScaleUp;
+}
+
+function getSourceDimensions_(source) {
+  if (!source) { return { width: 0, height: 0 }; }
+  if (typeof source.videoWidth === 'number' && typeof source.videoHeight === 'number') {
+    return { width: source.videoWidth, height: source.videoHeight };
+  }
+  if (typeof source.naturalWidth === 'number' && typeof source.naturalHeight === 'number') {
+    return { width: source.naturalWidth, height: source.naturalHeight };
+  }
+  if (typeof source.width === 'number' && typeof source.height === 'number') {
+    return { width: source.width, height: source.height };
+  }
+  return { width: 0, height: 0 };
+}
+
+function applyScanFilter_(ctx, pass) {
+  if (!ctx || !pass || pass.mode !== 'far') { return; }
+  if (typeof ctx.filter === 'string' && scanSession.farFilter) {
+    ctx.filter = scanSession.farFilter;
+  }
+}
+
+function clearScanFilter_(ctx) {
+  if (!ctx) { return; }
+  if (typeof ctx.filter === 'string') {
+    ctx.filter = 'none';
+  }
 }
 
 function getTargetSize_(sourceW, sourceH, maxWidth, scaleUp) {
@@ -1012,6 +1194,7 @@ function configureZXingReader_() {
       }
       canvasElementContext.imageSmoothingEnabled = true;
       if (canvasElementContext.imageSmoothingQuality) { canvasElementContext.imageSmoothingQuality = 'high'; }
+      applyScanFilter_(canvasElementContext, pass);
       var targetW = pass.target && pass.target.width ? pass.target.width : srcElement.videoWidth;
       var targetH = pass.target && pass.target.height ? pass.target.height : srcElement.videoHeight;
       if (canvasElementContext.canvas) {
@@ -1031,6 +1214,7 @@ function configureZXingReader_() {
         targetW,
         targetH
       );
+      clearScanFilter_(canvasElementContext);
     };
   } else if (scannerState.zxingOriginalDrawFrame) {
     scannerState.codeReader.drawFrameOnCanvas = scannerState.zxingOriginalDrawFrame;
