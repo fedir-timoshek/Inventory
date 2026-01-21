@@ -37,10 +37,15 @@ function getQuantityValue() {
 
 export function saveCurrentItem() {
   if (!ensureAuth()) { return; }
+  if (appState.imageProcessing) {
+    showToast('Please wait for the image to finish processing.', 'info');
+    return;
+  }
   var barcode = (dom.inputBarcode.value || '').toString().trim();
   var room = (dom.selectRoom.value || '').toString().trim();
   var notes = (dom.inputNotes.value || '').toString().trim();
   var quantity = getQuantityValue();
+  var imageDataUrl = appState.selectedImageDataUrl || '';
 
   if (!barcode) {
     showToast('Please scan or type a barcode.', 'error');
@@ -59,8 +64,14 @@ export function saveCurrentItem() {
     barcode: barcode,
     room: room,
     notes: notes,
+    quantity: quantity
+  };
+  var offlinePayload = {
+    barcode: barcode,
+    room: room,
+    notes: notes,
     quantity: quantity,
-    imageDataUrl: appState.selectedImageDataUrl || ''
+    imageDataUrl: imageDataUrl
   };
   if (!hasServer()) {
     showToast('Cannot save without API access.', 'error');
@@ -80,6 +91,9 @@ export function saveCurrentItem() {
         appState.entries.unshift(entry);
         applyFilterAndRender();
       }
+      if (entry && entry.id && imageDataUrl) {
+        uploadEntryImage(entry.id, imageDataUrl);
+      }
       dom.inputBarcode.value = '';
       dom.inputNotes.value = '';
       setQuantityValue(1);
@@ -88,11 +102,42 @@ export function saveCurrentItem() {
     .catch(function () {
       dom.btnSaveItem.disabled = false;
       dom.btnSaveItem.textContent = '💾 Save item';
-      enqueueOfflineEntry(payload);
+      enqueueOfflineEntry(offlinePayload);
       showToast('Saved locally; will sync when back online.', 'info');
       dom.inputBarcode.value = '';
       dom.inputNotes.value = '';
       setQuantityValue(1);
       clearSelectedImage();
     });
+}
+
+function uploadEntryImage(entryId, imageDataUrl) {
+  if (!entryId || !imageDataUrl) { return; }
+  showToast('Uploading photo...', 'info');
+  callApi('uploadEntryImage', appState.authToken, {
+    id: entryId,
+    imageDataUrl: imageDataUrl
+  })
+    .then(function (updatedEntry) {
+      if (updatedEntry && updatedEntry.id) {
+        updateEntryImageInState(updatedEntry);
+      }
+      showToast('Photo uploaded.', 'success');
+    })
+    .catch(function (err) {
+      console.log('uploadEntryImage error:', err);
+      showToast('Photo upload failed. Try again later.', 'error');
+    });
+}
+
+function updateEntryImageInState(updatedEntry) {
+  if (!updatedEntry || !updatedEntry.id) { return; }
+  var entries = appState.entries || [];
+  for (var i = 0; i < entries.length; i++) {
+    if (entries[i].id === updatedEntry.id) {
+      entries[i].imageUrl = updatedEntry.imageUrl || '';
+      applyFilterAndRender();
+      return;
+    }
+  }
 }

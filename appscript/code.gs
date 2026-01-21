@@ -96,6 +96,9 @@ function handleApiAction_(action, token, payload) {
   if (action === 'saveEntry') {
     return saveEntry(token, payload);
   }
+  if (action === 'uploadEntryImage') {
+    return uploadEntryImage(token, payload);
+  }
   if (action === 'listEntries') {
     return listEntries(token, payload && payload.limit ? payload.limit : undefined);
   }
@@ -110,7 +113,7 @@ function handleApiAction_(action, token, payload) {
 
 /**
  * Saves a new inventory entry from the form.
- * formData = { barcode, room, notes, quantity, imageDataUrl }
+ * formData = { barcode, room, notes, quantity, imageDataUrl? }
  */
 function saveEntry(idToken, formData) {
   var userEmail = getUserEmailFromToken_(idToken);
@@ -157,6 +160,44 @@ function saveEntry(idToken, formData) {
   logHistory_('CREATE', id, userEmail, null, entryObject);
 
   return entryObject;
+}
+
+/**
+ * Uploads or replaces the image for an existing entry.
+ * payload = { id, imageDataUrl }
+ */
+function uploadEntryImage(idToken, payload) {
+  var userEmail = getUserEmailFromToken_(idToken);
+  if (!payload || !payload.id) {
+    throw new Error('Missing entry ID.');
+  }
+  if (!payload.imageDataUrl) {
+    throw new Error('Missing image data.');
+  }
+
+  var id = payload.id.toString();
+  var sheet = getSheetByName_(INVENTORY_SHEET_NAME);
+  var rowIndex = findRowById_(sheet, id);
+  if (rowIndex === -1) {
+    throw new Error('Entry not found.');
+  }
+
+  var lastCol = Math.max(sheet.getLastColumn(), COL.DELETED);
+  var rowRange = sheet.getRange(rowIndex, 1, 1, lastCol);
+  var rowValues = rowRange.getValues()[0];
+  var oldEntry = rowToEntryObject_(rowValues);
+  var entryOwner = (rowValues[COL.USER_EMAIL - 1] || '').toString().toLowerCase();
+  if (!isAdmin_(userEmail) && entryOwner && entryOwner !== userEmail.toLowerCase()) {
+    throw new Error('You do not have permission to update this entry.');
+  }
+
+  var imageUrl = saveImageToDrive_(payload.imageDataUrl, id);
+  rowValues[COL.IMAGE_URL - 1] = imageUrl;
+  rowRange.setValues([rowValues]);
+
+  var newEntry = rowToEntryObject_(rowValues);
+  logHistory_('IMAGE', id, userEmail, oldEntry, newEntry);
+  return newEntry;
 }
 
 /**

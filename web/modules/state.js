@@ -21,6 +21,7 @@ export var appState = {
   torchSupported: false,
   torchOn: false,
   selectedImageDataUrl: null,
+  imageProcessing: false,
   offlineQueue: [],
   filterText: '',
   editingEntryId: null,
