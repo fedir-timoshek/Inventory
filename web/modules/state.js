@@ -40,6 +40,12 @@ export var scannerState = {
   cooldownMs: 1500,
   autoCloseTimer: null,
   scanHintTimer: null,
+  autoFocusTimer: null,
+  autoFocusInFlight: false,
+  autoFocusUnsupported: false,
+  autoFocusFallbackTried: false,
+  autoFocusAttempts: 0,
+  autoFocusVisibilityHandler: null,
   lastEngineWinner: null,
   lastMetrics: null,
   engineLabels: {}

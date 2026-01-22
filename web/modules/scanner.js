@@ -9,6 +9,10 @@ import { createScanManager } from './scanner/scan-manager.js';
 import { createVideoFrameSource } from './scanner/frame-source.js';
 
 var capabilitiesPromise = null;
+var AUTOFOCUS_START_DELAY_MS = 250;
+var AUTOFOCUS_RETRY_MS = 250;
+var AUTOFOCUS_INTERVAL_MS = 4500;
+var AUTOFOCUS_MAX_RETRIES = 10;
 
 function ensureCapabilities() {
   if (scannerState.capabilities) {
@@ -116,6 +120,7 @@ function armScanHintTimer() {
   scannerState.scanHintTimer = setTimeout(function () {
     if (!appState.scanning) { return; }
     showManualEntryPrompt('No barcode found. Improve lighting or distance.');
+    nudgeAutoFocus();
   }, 10000);
 }
 
@@ -124,6 +129,118 @@ function clearScanHintTimer() {
     clearTimeout(scannerState.scanHintTimer);
     scannerState.scanHintTimer = null;
   }
+}
+
+function armAutoFocus() {
+  clearAutoFocus();
+  scannerState.autoFocusUnsupported = false;
+  scannerState.autoFocusFallbackTried = false;
+  scannerState.autoFocusAttempts = 0;
+  scheduleAutoFocusCheck(AUTOFOCUS_START_DELAY_MS);
+  if (dom.video && typeof dom.video.addEventListener === 'function') {
+    dom.video.addEventListener('playing', nudgeAutoFocus, { once: true });
+  }
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    scannerState.autoFocusVisibilityHandler = function () {
+      if (!appState.scanning) { return; }
+      if (document.visibilityState === 'visible') {
+        nudgeAutoFocus();
+      }
+    };
+    document.addEventListener('visibilitychange', scannerState.autoFocusVisibilityHandler);
+  }
+}
+
+function clearAutoFocus() {
+  if (scannerState.autoFocusTimer) {
+    clearTimeout(scannerState.autoFocusTimer);
+    scannerState.autoFocusTimer = null;
+  }
+  scannerState.autoFocusInFlight = false;
+  scannerState.autoFocusAttempts = 0;
+  if (scannerState.autoFocusVisibilityHandler && typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', scannerState.autoFocusVisibilityHandler);
+  }
+  scannerState.autoFocusVisibilityHandler = null;
+}
+
+function scheduleAutoFocusCheck(delayMs) {
+  if (!appState.scanning) { return; }
+  if (scannerState.autoFocusTimer) {
+    clearTimeout(scannerState.autoFocusTimer);
+  }
+  scannerState.autoFocusTimer = setTimeout(function () {
+    if (!appState.scanning) { return; }
+    if (scannerState.autoFocusUnsupported) { return; }
+    var track = getActiveVideoTrack();
+    if (!track) {
+      if (scannerState.autoFocusAttempts < AUTOFOCUS_MAX_RETRIES) {
+        scannerState.autoFocusAttempts += 1;
+        scheduleAutoFocusCheck(AUTOFOCUS_RETRY_MS);
+        return;
+      }
+      scheduleAutoFocusCheck(AUTOFOCUS_INTERVAL_MS);
+      return;
+    }
+    requestAutoFocus(track, false);
+    scheduleAutoFocusCheck(AUTOFOCUS_INTERVAL_MS);
+  }, delayMs);
+}
+
+function nudgeAutoFocus() {
+  requestAutoFocus(null, true);
+}
+
+function requestAutoFocus(track, isNudge) {
+  if (!appState.scanning) { return; }
+  if (scannerState.autoFocusUnsupported || scannerState.autoFocusInFlight) { return; }
+  track = track || getActiveVideoTrack();
+  if (!track || typeof track.applyConstraints !== 'function') { return; }
+  var mode = pickFocusMode(track, isNudge);
+  if (!mode) { return; }
+  scannerState.autoFocusInFlight = true;
+  track.applyConstraints({ advanced: [{ focusMode: mode }] })
+    .catch(function () {
+      return track.applyConstraints({ focusMode: mode });
+    })
+    .then(function () {
+      scannerState.autoFocusInFlight = false;
+    })
+    .catch(function (err) {
+      scannerState.autoFocusInFlight = false;
+      if (isFocusUnsupportedError(err)) {
+        scannerState.autoFocusUnsupported = true;
+      }
+    });
+}
+
+function pickFocusMode(track, isNudge) {
+  var caps = null;
+  try {
+    caps = (track && typeof track.getCapabilities === 'function') ? track.getCapabilities() : null;
+  } catch (e) {}
+  var modes = caps && caps.focusMode ? caps.focusMode : null;
+  var preferred = isNudge
+    ? ['auto', 'single-shot', 'continuous']
+    : ['continuous', 'auto', 'single-shot'];
+  if (Array.isArray(modes) && modes.length) {
+    for (var i = 0; i < preferred.length; i++) {
+      if (modes.indexOf(preferred[i]) !== -1) {
+        return preferred[i];
+      }
+    }
+    return null;
+  }
+  if (scannerState.autoFocusFallbackTried) { return null; }
+  scannerState.autoFocusFallbackTried = true;
+  return isNudge ? 'auto' : 'continuous';
+}
+
+function isFocusUnsupportedError(err) {
+  if (!err || !err.name) { return false; }
+  return err.name === 'OverconstrainedError'
+    || err.name === 'NotSupportedError'
+    || err.name === 'TypeError';
 }
 
 export function initScannerSupport() {
@@ -262,12 +379,14 @@ export function startScanner() {
       setScanStatus('Scanning…', 'Scanning');
       armScanHintTimer();
       armTorchCheck();
+      armAutoFocus();
     })
     .catch(function (err) {
       appState.scanning = false;
       updateScanButton();
       updateTorchUI();
       clearScanHintTimer();
+      clearAutoFocus();
       setScanStatus('Camera error: ' + (err && err.message ? err.message : ''), 'Error');
       showToast('Could not start camera. Check permissions.', 'error');
     });
@@ -301,6 +420,7 @@ function handleScanResult(result, metrics) {
     updateScanButton();
     updateTorchUI();
     clearScanHintTimer();
+    clearAutoFocus();
   } else if (appState.scanning) {
     armScanHintTimer();
   }
@@ -346,6 +466,7 @@ function handleScanTimeout() {
     scannerState.scanManager = null;
   }
   clearScanHintTimer();
+  clearAutoFocus();
 }
 
 function handleScanError(err) {
@@ -358,6 +479,7 @@ function handleScanError(err) {
     scannerState.scanManager = null;
   }
   clearScanHintTimer();
+  clearAutoFocus();
 }
 
 function handleEngineStatus(payload) {
@@ -369,6 +491,7 @@ export function stopScanner() {
   appState.scanning = false;
   clearManualEntryPrompt();
   clearScanHintTimer();
+  clearAutoFocus();
   if (scannerState.scanManager && typeof scannerState.scanManager.stop === 'function') {
     scannerState.scanManager.stop();
   }

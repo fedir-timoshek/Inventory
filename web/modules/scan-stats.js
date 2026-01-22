@@ -17,8 +17,14 @@ export function loadScanStatsQueue() {
     var parsed = JSON.parse(raw);
     if (parsed && parsed.splice) {
       for (var i = 0; i < parsed.length; i++) {
+        if (!parsed[i].createdAt) {
+          parsed[i].createdAt = new Date().toISOString();
+        }
         if (!parsed[i].localId) {
           parsed[i].localId = buildLocalId(parsed[i], i);
+        }
+        if (!parsed[i].statId) {
+          parsed[i].statId = parsed[i].localId;
         }
       }
       scanStatsQueue = parsed;
@@ -93,9 +99,12 @@ export function syncScanStatsQueue() {
 
 function buildEntry(payload) {
   payload = payload || {};
+  var createdAt = payload.createdAt || new Date().toISOString();
+  var localId = payload.localId || payload.statId || buildLocalId({ createdAt: createdAt });
   return {
-    localId: payload.localId || buildLocalId(payload),
-    createdAt: payload.createdAt || new Date().toISOString(),
+    localId: localId,
+    statId: payload.statId || localId,
+    createdAt: createdAt,
     os: payload.os || '',
     deviceModel: payload.deviceModel || '',
     browser: payload.browser || '',

@@ -386,6 +386,21 @@ function logScanStat(idToken, payload) {
   var engineId = sanitizeStatValue_(payload.engineId, 80);
   var engineName = sanitizeStatValue_(payload.engineName, 120);
   var online = sanitizeStatValue_(payload.online, 12);
+  var statId = sanitizeStatValue_(payload.statId || payload.localId, 120);
+
+  if (statId) {
+    var statIdCol = getScanStatsColumnIndex_(sheet, 'Stat ID');
+    var lastRow = sheet.getLastRow();
+    if (statIdCol > 0 && lastRow > 1) {
+      var finder = sheet.getRange(2, statIdCol, lastRow - 1, 1)
+        .createTextFinder(statId)
+        .matchEntireCell(true)
+        .findNext();
+      if (finder) {
+        return { success: true, deduped: true };
+      }
+    }
+  }
 
   sheet.appendRow([
     now,
@@ -396,7 +411,8 @@ function logScanStat(idToken, payload) {
     scanMs,
     engineId,
     engineName,
-    online
+    online,
+    statId
   ]);
 
   return { success: true };
@@ -429,7 +445,8 @@ function ensureScanStatsHeader_(sheet) {
     'Scan Time (ms)',
     'Engine Id',
     'Engine Name',
-    'Online'
+    'Online',
+    'Stat ID'
   ];
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(headers);
@@ -451,6 +468,18 @@ function ensureScanStatsHeader_(sheet) {
   if (sheet.getFrozenRows() < 1) {
     sheet.setFrozenRows(1);
   }
+}
+
+function getScanStatsColumnIndex_(sheet, headerName) {
+  var lastCol = sheet.getLastColumn();
+  if (lastCol < 1) { return -1; }
+  var row = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  for (var i = 0; i < row.length; i++) {
+    if (row[i] === headerName) {
+      return i + 1;
+    }
+  }
+  return -1;
 }
 
 function sanitizeStatValue_(value, maxLen) {
