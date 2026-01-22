@@ -137,6 +137,7 @@ function getInitialData(idToken) {
   var isAdmin = isAdmin_(userEmail);
   var rooms = getRooms_();
   var entries = isAdmin ? listEntries_(RECENT_ENTRIES_LIMIT) : listEntries_(RECENT_ENTRIES_LIMIT, userEmail);
+  getScanStatsSheet_();
 
   return {
     userEmail: userEmail,
