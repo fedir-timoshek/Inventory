@@ -16,7 +16,7 @@ This file is the single source of truth for how to work on this Google Apps Scri
 
 ## Key JS behaviors (`web/index.html`)
 - Offline queue: localStorage key `icsInventoryOfflineQueue_v1`; sync uses `syncOfflineQueue()` and currently calls `saveEntry` per item without local prepend (only refresh at end).
-- Scanner lifecycle: `startScanner` / `stopScanner` manage ZXing; auto-stop after detection if not continuous; closing sheets stops camera.
+- Scanner lifecycle: `startScanner` / `stopScanner` manage ScanManager + multi-engine decode; auto-stop after detection if not continuous; closing sheets stops camera.
 - Layout: responsive via classes `is-mobile` (width < 860), sticky actions bar; safe-area padding applied.
 - Plans to avoid: do not introduce modules/build steps; keep vanilla JS and inline CSS/JS.
 
@@ -30,13 +30,14 @@ This file is the single source of truth for how to work on this Google Apps Scri
 ## Changelog for collaborators
 - 2025-01-XX: Added this guide. Current state: bottom-sheet scanner, sticky actions bar, large controls via clamp, offline sync without local prepend in `syncOfflineQueue()`.
 - 2025-12-27: Split repo into `appscript/` and `web/` folders for clean copy to Apps Script and GitHub Pages.
+- 2026-01-22: Rebuilt scanner with capability detection, parallel multi-engine decode (ZXing WASM, ZBar WASM, BarcodeDetector native/ponyfill, Quagga2, html5-qrcode), worker offload, local wasm/vendor assets, and service worker precache. Added scan tests and sample barcode assets.
 
 ## When you update things, add notes here
 - Describe what changed (UI/logic), date, and any follow-up TODOs.
 - Note any known quirks (e.g., sticky bar overlap risk, offline sync UX).
 
 ## Quick start checklist
-- Need the scanner? Use `openScannerSheet()`; ZXing is already loaded via CDN.
+- Need the scanner? Use `openScannerSheet()`; engines are lazy-loaded from local assets.
 - Need rooms? Use `openRoomSheet()`; data comes from `getInitialData()` server call.
 - Need to sync offline? Call `syncOfflineQueue()`; it drains localStorage and hits `saveEntry`.
-- Avoid external deps; keep everything inline and HtmlService-compatible.
+- Scanner assets live in `web/assets/vendor` and `web/assets/wasm`; service worker caches them for offline use.

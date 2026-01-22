@@ -11,8 +11,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 
-  <!-- ZXing UMD build for browser barcode scanning -->
-  <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js" integrity="sha384-BzBxP10ZE72aitqj5UMmUsbKFliP/DZqA8Wq+BNNhlIJDGoEd1tpkMYXOg9+n6sB" crossorigin="anonymous"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 
   <link rel="stylesheet" href="styles.css">
@@ -180,6 +178,10 @@
           <div id="scanStatusBadge" class="scan-status-badge">Idle</div>
         </div>
         <div id="scanEngineStatus" class="scan-engine-status muted">Engine: -</div>
+        <div id="scanHelp" class="scan-help hidden">
+          <div id="scanHelpText">No barcode found. Improve lighting or distance.</div>
+          <button id="btnManualEntry" type="button" class="btn btn-ghost">Enter manually</button>
+        </div>
         <div class="field-row" style="margin-top:8px; flex-wrap:wrap;">
           <label class="muted" style="display:flex; align-items:center; gap:6px;">
             <input type="checkbox" id="continuousToggle"> Continuous

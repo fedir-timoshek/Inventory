@@ -28,19 +28,18 @@ export var appState = {
   scannerSheetOpen: false,
   scannerEngine: '',
   scannerEngineLabel: '',
-  scannerEngineAvailable: false
+  scannerEngineAvailable: false,
+  scannerEngines: []
 };
 
 export var scannerState = {
-  codeReader: null,
-  barcodeDetector: null,
-  barcodeDetectorFormats: [],
-  barcodeDetectRaf: 0,
-  barcodeDetectBusy: false,
-  barcodeDetectLastTs: 0,
-  barcodeDetectIntervalMs: 140,
+  scanManager: null,
+  capabilities: null,
   lastCode: '',
   lastCodeTime: 0,
   cooldownMs: 1500,
-  autoCloseTimer: null
+  autoCloseTimer: null,
+  lastEngineWinner: null,
+  lastMetrics: null,
+  engineLabels: {}
 };

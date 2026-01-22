@@ -50,6 +50,10 @@ async function buildAssets() {
   if (existsSync('web/assets')) {
     await copyDir('web/assets', join(outDir, 'assets'));
   }
+  if (existsSync('web/sw.js')) {
+    const swContent = await readFile('web/sw.js');
+    await writeFile(join(outDir, 'sw.js'), swContent);
+  }
 }
 
 function replaceConfigPlaceholders(source) {

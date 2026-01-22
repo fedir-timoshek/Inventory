@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="../">
+  <title>Scan Engine Tests</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { padding: 20px; }
+    .engine-grid { display: grid; gap: 12px; }
+    .engine-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; }
+    .engine-card h3 { margin: 0 0 8px 0; font-size: 1rem; }
+    .engine-result { font-family: monospace; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h2>Scan Engine Tests</h2>
+  <p class="muted">Runs Code 128 / Code 39 sample images through each engine.</p>
+  <div id="engineResults" class="engine-grid"></div>
+  <script type="module" src="tests/scan-engines.test.js"></script>
+</body>
+</html>

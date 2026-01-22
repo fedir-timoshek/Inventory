@@ -2,50 +2,43 @@ import { appState, scannerState } from './state.js';
 import { dom } from './dom.js';
 import { showToast } from './toast.js';
 import { triggerVibrate } from './utils.js';
+import { detectCapabilities } from './scanner/capabilities.js';
+import { getEngineRegistry, createSupportedEngines } from './scanner/engine-registry.js';
+import { createScanManager } from './scanner/scan-manager.js';
+import { createVideoFrameSource } from './scanner/frame-source.js';
 
-function getUserAgent() {
-  return (navigator && navigator.userAgent) ? navigator.userAgent : '';
-}
+var capabilitiesPromise = null;
 
-function isAndroidPlatform() {
-  return /Android/i.test(getUserAgent());
-}
-
-function isIOSPlatform() {
-  var ua = getUserAgent();
-  var isIOS = /iPad|iPhone|iPod/i.test(ua);
-  var isIPadOS = navigator && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
-  return isIOS || isIPadOS;
-}
-
-function supportsZXing() {
-  return !!(window.ZXing && ZXing.BrowserMultiFormatReader);
-}
-
-function supportsBarcodeDetector() {
-  return typeof window.BarcodeDetector === 'function';
-}
-
-function selectScannerEngine() {
-  if (isAndroidPlatform()) {
-    return {
-      engine: 'barcode-detector',
-      label: 'BarcodeDetector (Android)',
-      available: supportsBarcodeDetector()
-    };
+function ensureCapabilities() {
+  if (scannerState.capabilities) {
+    return Promise.resolve(scannerState.capabilities);
   }
-  return {
-    engine: 'zxing',
-    label: isIOSPlatform() ? 'ZXing (iOS)' : 'ZXing (Web)',
-    available: supportsZXing()
-  };
+  if (capabilitiesPromise) {
+    return capabilitiesPromise;
+  }
+  capabilitiesPromise = detectCapabilities()
+    .then(function (capabilities) {
+      scannerState.capabilities = capabilities;
+      capabilitiesPromise = null;
+      return capabilities;
+    })
+    .catch(function (err) {
+      capabilitiesPromise = null;
+      throw err;
+    });
+  return capabilitiesPromise;
 }
 
 function updateScanEngineStatus() {
   if (!dom.scanEngineStatus) { return; }
-  var label = appState.scannerEngineLabel || 'Unknown';
+  var label = appState.scannerEngineLabel || 'None';
   var suffix = appState.scannerEngineAvailable ? '' : ' - unavailable';
-  dom.scanEngineStatus.textContent = 'Engine: ' + label + suffix;
+  var winner = scannerState.lastEngineWinner;
+  var winnerText = '';
+  if (winner && winner.name) {
+    winnerText = ' | Winner: ' + winner.name + (winner.ms ? (' (' + winner.ms + 'ms)') : '');
+  }
+  dom.scanEngineStatus.textContent = 'Engines: ' + label + suffix + winnerText;
 }
 
 function applyCameraDeviceOptions(devices) {
@@ -86,53 +79,44 @@ function populateCameraSelectWithMediaDevices() {
     });
 }
 
-function populateCameraSelectWithZXing() {
-  try {
-    if (!supportsZXing() || typeof Promise === 'undefined') {
-      if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
-      return;
-    }
-    var tempReader = new ZXing.BrowserMultiFormatReader();
-    tempReader.listVideoInputDevices()
-      .then(function (devices) {
-        applyCameraDeviceOptions(devices || []);
-      })
-      .catch(function () {
-        if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
-      });
-  } catch (e) {
-    if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
+function applyEngineSupport(capabilities) {
+  var registry = getEngineRegistry();
+  var supported = registry.filter(function (entry) {
+    return entry.isSupported(capabilities);
+  });
+  appState.scannerEngines = supported.map(function (entry) { return entry.name; });
+  appState.scannerEngineLabel = appState.scannerEngines.length ? appState.scannerEngines.join(', ') : 'None';
+  appState.scannerEngineAvailable = appState.scannerEngines.length > 0;
+  appState.scannerEngine = appState.scannerEngineAvailable ? 'multi' : '';
+  scannerState.engineLabels = {};
+  for (var i = 0; i < supported.length; i++) {
+    scannerState.engineLabels[supported[i].id] = supported[i].name;
+  }
+  updateScanEngineStatus();
+}
+
+function showManualEntryPrompt(text) {
+  if (dom.scanHelpText) {
+    dom.scanHelpText.textContent = text || 'No barcode found. Improve lighting or distance.';
+  }
+  if (dom.scanHelp) {
+    dom.scanHelp.classList.remove('hidden');
   }
 }
 
-function ensureBarcodeDetectorReady() {
-  if (scannerState.barcodeDetector) {
-    return Promise.resolve(scannerState.barcodeDetector);
+function clearManualEntryPrompt() {
+  if (dom.scanHelp) {
+    dom.scanHelp.classList.add('hidden');
   }
-  if (!supportsBarcodeDetector()) {
-    return Promise.reject(new Error('BarcodeDetector API not supported.'));
-  }
-  var formatsPromise = (typeof BarcodeDetector.getSupportedFormats === 'function')
-    ? BarcodeDetector.getSupportedFormats()
-    : Promise.resolve([]);
-  return Promise.resolve(formatsPromise)
-    .catch(function () { return []; })
-    .then(function (formats) {
-      var formatList = Array.isArray(formats) ? formats : [];
-      scannerState.barcodeDetectorFormats = formatList.slice();
-      var options = formatList.length ? { formats: formatList } : undefined;
-      scannerState.barcodeDetector = new BarcodeDetector(options);
-      return scannerState.barcodeDetector;
-    });
 }
 
 export function initScannerSupport() {
   appState.cameraSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-  var engineInfo = selectScannerEngine();
-  appState.scannerEngine = engineInfo.engine;
-  appState.scannerEngineLabel = engineInfo.label;
-  appState.scannerEngineAvailable = engineInfo.available;
+  appState.scannerEngineAvailable = false;
+  appState.scannerEngineLabel = 'Checking...';
   updateScanEngineStatus();
+  clearManualEntryPrompt();
+
   if (!appState.cameraSupported) {
     setScanStatus('Camera scanning is not supported.', 'Idle');
     if (dom.cameraSupportMessage) {
@@ -144,30 +128,37 @@ export function initScannerSupport() {
     updateTorchUI();
     return;
   }
-  if (!appState.scannerEngineAvailable) {
-    setScanStatus('Scanner engine unavailable.', 'Error');
-    if (dom.cameraSupportMessage) {
-      dom.cameraSupportMessage.textContent = appState.scannerEngine === 'barcode-detector'
-        ? 'BarcodeDetector API is not supported in this browser. Update Chrome on Android or use another device.'
-        : 'Barcode scanner library is not available. You can still type barcodes manually.';
-      dom.cameraSupportMessage.classList.remove('hidden');
-    }
-    if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
-    updateScanButton();
-    updateTorchUI();
-    return;
-  }
 
-  if (dom.cameraSupportMessage) { dom.cameraSupportMessage.classList.add('hidden'); }
-  updateScanButton();
-  updateTorchUI();
-
-  if (appState.scannerEngine === 'barcode-detector') {
-    populateCameraSelectWithMediaDevices();
-  } else {
-    populateCameraSelectWithZXing();
-  }
-  setScanStatus('Camera off', 'Idle');
+  ensureCapabilities()
+    .then(function (capabilities) {
+      applyEngineSupport(capabilities);
+      updateScanButton();
+      updateTorchUI();
+      if (!appState.scannerEngineAvailable) {
+        setScanStatus('Scanner engines unavailable.', 'Error');
+        if (dom.cameraSupportMessage) {
+          dom.cameraSupportMessage.textContent = 'Barcode engines are not supported on this device. You can still type barcodes manually.';
+          dom.cameraSupportMessage.classList.remove('hidden');
+        }
+        if (dom.cameraSelectRow) { dom.cameraSelectRow.classList.add('hidden'); }
+        return;
+      }
+      if (dom.cameraSupportMessage) { dom.cameraSupportMessage.classList.add('hidden'); }
+      populateCameraSelectWithMediaDevices();
+      setScanStatus('Camera off', 'Idle');
+    })
+    .catch(function () {
+      appState.scannerEngineAvailable = false;
+      appState.scannerEngineLabel = 'Unavailable';
+      updateScanEngineStatus();
+      setScanStatus('Scanner engines unavailable.', 'Error');
+      if (dom.cameraSupportMessage) {
+        dom.cameraSupportMessage.textContent = 'Barcode engines are not available in this browser.';
+        dom.cameraSupportMessage.classList.remove('hidden');
+      }
+      updateScanButton();
+      updateTorchUI();
+    });
 }
 
 export function openScannerSheet() {
@@ -198,194 +189,143 @@ export function closeScannerSheet(options) {
 }
 
 export function startScanner() {
+  clearManualEntryPrompt();
   if (!appState.cameraSupported) {
     showToast('Camera scanning is not available on this device.', 'error');
     return;
   }
   if (!appState.scannerEngineAvailable) {
     showToast('Barcode scanning is not available in this browser.', 'error');
-    setScanStatus('Scanner engine unavailable.', 'Error');
+    setScanStatus('Scanner engines unavailable.', 'Error');
     return;
   }
   if (appState.scanning) { return; }
 
-  if (appState.scannerEngine === 'barcode-detector') {
-    startBarcodeDetectorScanner();
-    return;
-  }
-
-  if (!supportsZXing()) {
-    setScanStatus('Scanner library failed to load.', 'Error');
-    showToast('Barcode scanner library not available.', 'error');
-    return;
-  }
-
-  if (!scannerState.codeReader) {
-    scannerState.codeReader = new ZXing.BrowserMultiFormatReader();
-  }
-
   appState.scanning = true;
   appState.torchSupported = null;
   appState.torchOn = false;
   updateTorchUI();
   updateScanButton();
-  setScanStatus('Requesting camera…', 'Scanning');
+  setScanStatus('Preparing scanner…', 'Scanning');
 
-  var deviceId = appState.selectedCameraId || undefined;
-  try {
-    var startPromise = scannerState.codeReader.decodeFromVideoDevice(deviceId, dom.video, function (result, err) {
-      if (!appState.scanning) { return; }
-      if (result) {
-        var text = result.text || (result.getText ? result.getText() : '');
-        onBarcodeDetected(text);
-      } else if (err && err.name !== 'NotFoundException') { console.log('Decode error:', err); }
-    });
-    if (startPromise && typeof startPromise.catch === 'function') {
-      startPromise.catch(function (err) {
-        appState.scanning = false;
-        updateScanButton();
-        setScanStatus('Camera error: ' + (err && err.message ? err.message : ''), 'Error');
-        showToast('Could not start camera. Check permissions.', 'error');
+  ensureCapabilities()
+    .then(function (capabilities) {
+      applyEngineSupport(capabilities);
+      if (!appState.scannerEngineAvailable) {
+        throw new Error('No supported engines.');
+      }
+      var engines = createSupportedEngines(capabilities);
+      if (!engines.length) {
+        throw new Error('No supported engines.');
+      }
+      var frameSource = createVideoFrameSource(dom.video, {
+        maxWidth: 720,
+        maxHeight: 720
       });
-    }
-    setScanStatus('Scanning…', 'Scanning');
-    armTorchCheck();
-  } catch (e) {
-    appState.scanning = false;
-    updateScanButton();
-    setScanStatus('Camera error: ' + (e && e.message ? e.message : ''), 'Error');
-    showToast('Could not start camera.', 'error');
-  }
-}
-
-function startBarcodeDetectorScanner() {
-  appState.scanning = true;
-  appState.torchSupported = null;
-  appState.torchOn = false;
-  updateTorchUI();
-  updateScanButton();
-  setScanStatus('Requesting camera…', 'Scanning');
-
-  ensureBarcodeDetectorReady()
-    .then(function () {
-      if (!appState.scanning) { throw new Error('Scan cancelled.'); }
-      return startBarcodeDetectorStream();
+      scannerState.scanManager = createScanManager({
+        frameSource: frameSource,
+        engines: engines,
+        continuous: appState.continuousScanning,
+        timeoutMs: appState.continuousScanning ? 0 : 10000,
+        cooldownMs: scannerState.cooldownMs,
+        validationOptions: {
+          code39MinLen: 3,
+          code39MaxLen: 64,
+          code128MinLen: 4,
+          code128MaxLen: 80
+        },
+        onResult: handleScanResult,
+        onTimeout: handleScanTimeout,
+        onError: handleScanError,
+        onStatus: handleEngineStatus
+      });
+      return scannerState.scanManager.start({ deviceId: appState.selectedCameraId || '' });
     })
     .then(function () {
       if (!appState.scanning) { return; }
       setScanStatus('Scanning…', 'Scanning');
       armTorchCheck();
-      startBarcodeDetectLoop();
     })
     .catch(function (err) {
-      if (!appState.scanning) { return; }
       appState.scanning = false;
       updateScanButton();
+      updateTorchUI();
       setScanStatus('Camera error: ' + (err && err.message ? err.message : ''), 'Error');
       showToast('Could not start camera. Check permissions.', 'error');
     });
 }
 
-function startBarcodeDetectorStream() {
-  var constraints = { video: { facingMode: { ideal: 'environment' } }, audio: false };
-  if (appState.selectedCameraId) {
-    constraints.video.deviceId = { exact: appState.selectedCameraId };
-  }
-  return navigator.mediaDevices.getUserMedia(constraints)
-    .then(function (stream) {
-      if (!dom.video) {
-        if (stream && typeof stream.getTracks === 'function') {
-          stream.getTracks().forEach(function (t) { t.stop(); });
-        }
-        throw new Error('Video element not available.');
-      }
-      dom.video.srcObject = stream;
-      var playPromise = dom.video.play();
-      if (playPromise && typeof playPromise.catch === 'function') {
-        return playPromise;
-      }
-      return null;
+function handleScanResult(result, metrics) {
+  if (!result || !result.rawValue) { return; }
+  var winner = {
+    id: result.engineId || '',
+    name: (scannerState.engineLabels && scannerState.engineLabels[result.engineId]) || result.engineId || 'engine',
+    ms: (result.meta && result.meta.durationMs) ? result.meta.durationMs : null
+  };
+  scannerState.lastEngineWinner = winner;
+  scannerState.lastMetrics = {
+    timeToFirstDecodeMs: metrics ? metrics.elapsedMs : null,
+    engineId: result.engineId || '',
+    format: result.format || '',
+    rawValue: result.rawValue
+  };
+  updateScanEngineStatus();
+  if (metrics && metrics.elapsedMs) {
+    console.info('Scanner decode', {
+      timeToFirstDecodeMs: metrics.elapsedMs,
+      engineId: result.engineId || '',
+      format: result.format || '',
+      rawValue: result.rawValue
     });
+  }
+  if (!appState.continuousScanning) {
+    appState.scanning = false;
+    updateScanButton();
+    updateTorchUI();
+  }
+  onBarcodeDetected(result.rawValue, result.format);
 }
 
-function startBarcodeDetectLoop() {
-  scannerState.barcodeDetectLastTs = 0;
-  if (scannerState.barcodeDetectRaf) {
-    cancelAnimationFrame(scannerState.barcodeDetectRaf);
+function handleScanTimeout(meta) {
+  appState.scanning = false;
+  updateScanButton();
+  updateTorchUI();
+  setScanStatus('No barcode detected.', 'Timeout');
+  showManualEntryPrompt('No barcode found. Improve lighting or distance.');
+  showToast('No barcode detected. Try better lighting or distance.', 'info');
+  if (scannerState.scanManager) {
+    scannerState.scanManager = null;
   }
-  scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
 }
 
-function stopBarcodeDetectLoop() {
-  if (scannerState.barcodeDetectRaf) {
-    cancelAnimationFrame(scannerState.barcodeDetectRaf);
+function handleScanError(err) {
+  appState.scanning = false;
+  updateScanButton();
+  updateTorchUI();
+  setScanStatus('Camera error: ' + (err && err.message ? err.message : ''), 'Error');
+  showToast('Could not start camera. Check permissions.', 'error');
+  if (scannerState.scanManager) {
+    scannerState.scanManager = null;
   }
-  scannerState.barcodeDetectRaf = 0;
-  scannerState.barcodeDetectBusy = false;
 }
 
-function runBarcodeDetectLoop(timestamp) {
-  if (!appState.scanning || !scannerState.barcodeDetector) { return; }
-  if (scannerState.barcodeDetectBusy) {
-    scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
-    return;
-  }
-  if (timestamp - scannerState.barcodeDetectLastTs < scannerState.barcodeDetectIntervalMs) {
-    scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
-    return;
-  }
-  if (!dom.video || dom.video.readyState < 2) {
-    scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
-    return;
-  }
-  scannerState.barcodeDetectBusy = true;
-  scannerState.barcodeDetectLastTs = timestamp;
-  scannerState.barcodeDetector.detect(dom.video)
-    .then(function (barcodes) {
-      scannerState.barcodeDetectBusy = false;
-      if (!appState.scanning) { return; }
-      if (barcodes && barcodes.length) {
-        var value = getBarcodeValue(barcodes[0]);
-        onBarcodeDetected(value);
-      }
-      if (appState.scanning) {
-        scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
-      }
-    })
-    .catch(function () {
-      scannerState.barcodeDetectBusy = false;
-      if (appState.scanning) {
-        scannerState.barcodeDetectRaf = requestAnimationFrame(runBarcodeDetectLoop);
-      }
-    });
-}
-
-function getBarcodeValue(barcode) {
-  if (!barcode) { return ''; }
-  return barcode.rawValue || barcode.data || barcode.displayValue || '';
+function handleEngineStatus(payload) {
+  if (!payload || !payload.error) { return; }
+  console.log('Engine error:', payload.engineId, payload.error);
 }
 
 export function stopScanner() {
   appState.scanning = false;
-  stopBarcodeDetectLoop();
+  clearManualEntryPrompt();
+  if (scannerState.scanManager && typeof scannerState.scanManager.stop === 'function') {
+    scannerState.scanManager.stop();
+  }
+  scannerState.scanManager = null;
   if (appState.torchOn) { setTorchEnabled(false, false); }
   appState.torchSupported = false;
   appState.torchOn = false;
   updateTorchUI();
   updateScanButton();
-  try {
-    if (scannerState.codeReader && typeof scannerState.codeReader.reset === 'function') {
-      scannerState.codeReader.reset();
-    }
-  } catch (e) { console.log('Error resetting reader:', e); }
-
-  try {
-    if (dom.video && dom.video.srcObject && typeof dom.video.srcObject.getTracks === 'function') {
-      dom.video.srcObject.getTracks().forEach(function (t) { t.stop(); });
-    }
-    if (dom.video) { dom.video.srcObject = null; }
-  } catch (err) { console.log('Error stopping camera tracks:', err); }
-
   setScanStatus('Camera off', 'Idle');
 }
 
@@ -480,7 +420,7 @@ function setTorchEnabled(enabled, showFailureToast) {
     });
 }
 
-function onBarcodeDetected(text) {
+function onBarcodeDetected(text, format) {
   if (!text) { return; }
   var now = Date.now();
   if (scannerState.lastCode === text && (now - scannerState.lastCodeTime) < scannerState.cooldownMs) { return; }
@@ -488,7 +428,9 @@ function onBarcodeDetected(text) {
   scannerState.lastCodeTime = now;
 
   dom.inputBarcode.value = text;
-  setScanStatus('Barcode: ' + text, 'Detected');
+  var formatLabel = format ? format.replace(/_/g, ' ').toUpperCase() : 'BARCODE';
+  setScanStatus(formatLabel + ': ' + text, 'Detected');
+  clearManualEntryPrompt();
   flashScannerSuccess();
   triggerVibrate(80);
 

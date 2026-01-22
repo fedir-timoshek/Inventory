@@ -22,6 +22,9 @@ export function cacheDom() {
   dom.scanStatus = $('scanStatus');
   dom.scanStatusBadge = $('scanStatusBadge');
   dom.scanEngineStatus = $('scanEngineStatus');
+  dom.scanHelp = $('scanHelp');
+  dom.scanHelpText = $('scanHelpText');
+  dom.btnManualEntry = $('btnManualEntry');
   dom.cameraSupportMessage = $('cameraSupportMessage');
   dom.cameraSelectRow = $('cameraSelectRow');
   dom.cameraSelect = $('cameraSelect');

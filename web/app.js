@@ -24,6 +24,7 @@ import {
 import { saveCurrentItem, clearForm, adjustQuantity, setQuantityValue } from './modules/items.js';
 import { handleLayoutChange } from './modules/layout.js';
 import { debounce } from './modules/utils.js';
+import { registerServiceWorker } from './modules/service-worker.js';
 
 function bindEvents() {
   dom.tabScan.onclick = function () { switchTab('scan'); };
@@ -59,6 +60,9 @@ function bindEvents() {
 
   dom.btnCloseScannerSheet.onclick = function () { closeScannerSheet(); };
   dom.scannerSheetBackdrop.onclick = function () { closeScannerSheet(); };
+  if (dom.btnManualEntry) {
+    dom.btnManualEntry.onclick = function () { closeScannerSheet(); };
+  }
   document.addEventListener('keydown', function (evt) {
     if (evt.key === 'Escape') {
       closeScannerSheet();
@@ -165,6 +169,7 @@ function initApp() {
   initScannerSupport();
   loadOfflineQueue();
   updateOfflineBadge();
+  registerServiceWorker();
   switchTab('scan');
   initAuth({
     onInitialData: handleInitialData,
