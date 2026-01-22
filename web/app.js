@@ -13,6 +13,7 @@ import {
 import { openRoomSheet, closeRoomSheet, populateRooms } from './modules/rooms.js';
 import { handleImageFileChange, clearSelectedImage } from './modules/images.js';
 import { loadOfflineQueue, updateOfflineBadge, syncOfflineQueue } from './modules/offline.js';
+import { loadScanStatsQueue, syncScanStatsQueue } from './modules/scan-stats.js';
 import {
   setFilterText,
   refreshEntriesFromServer,
@@ -105,8 +106,14 @@ function bindEvents() {
   dom.btnSyncScan.onclick = function () { syncOfflineQueue(); };
   dom.btnSyncEntries.onclick = function () { syncOfflineQueue(); };
 
-  window.addEventListener('online', function () { syncOfflineQueue(); });
-  window.addEventListener('focus', function () { syncOfflineQueue(); });
+  window.addEventListener('online', function () {
+    syncOfflineQueue();
+    syncScanStatsQueue();
+  });
+  window.addEventListener('focus', function () {
+    syncOfflineQueue();
+    syncScanStatsQueue();
+  });
   window.addEventListener('pagehide', function () {
     stopScanner();
     closeScannerSheet({ skipFocus: true });
@@ -159,6 +166,7 @@ function syncOnSignedIn() {
   if (appState.offlineQueue && appState.offlineQueue.length) {
     syncOfflineQueue();
   }
+  syncScanStatsQueue();
 }
 
 function initApp() {
@@ -168,7 +176,9 @@ function initApp() {
   handleLayoutChange();
   initScannerSupport();
   loadOfflineQueue();
+  loadScanStatsQueue();
   updateOfflineBadge();
+  syncScanStatsQueue();
   registerServiceWorker();
   switchTab('scan');
   initAuth({

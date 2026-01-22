@@ -31,6 +31,7 @@ This file is the single source of truth for how to work on this Google Apps Scri
 - 2025-01-XX: Added this guide. Current state: bottom-sheet scanner, sticky actions bar, large controls via clamp, offline sync without local prepend in `syncOfflineQueue()`.
 - 2025-12-27: Split repo into `appscript/` and `web/` folders for clean copy to Apps Script and GitHub Pages.
 - 2026-01-22: Rebuilt scanner with capability detection, parallel multi-engine decode (ZXing WASM, ZBar WASM, BarcodeDetector native/ponyfill, Quagga2, html5-qrcode), worker offload, local wasm/vendor assets, and service worker precache. Added scan tests and sample barcode assets.
+- 2026-01-22: Added ScanStats logging on successful scans (OS, device model, browser, format, engine, time, online flag) into a `ScanStats` sheet via the `logScanStat` API with offline queue sync. Scanner no longer auto-times out; shows a hint after 10s but keeps scanning.
 
 ## When you update things, add notes here
 - Describe what changed (UI/logic), date, and any follow-up TODOs.
@@ -41,3 +42,4 @@ This file is the single source of truth for how to work on this Google Apps Scri
 - Need rooms? Use `openRoomSheet()`; data comes from `getInitialData()` server call.
 - Need to sync offline? Call `syncOfflineQueue()`; it drains localStorage and hits `saveEntry`.
 - Scanner assets live in `web/assets/vendor` and `web/assets/wasm`; service worker caches them for offline use.
+- Scan stats append to the `ScanStats` tab on each successful barcode decode; offline stats queue syncs when back online.

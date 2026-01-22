@@ -39,6 +39,7 @@ export var scannerState = {
   lastCodeTime: 0,
   cooldownMs: 1500,
   autoCloseTimer: null,
+  scanHintTimer: null,
   lastEngineWinner: null,
   lastMetrics: null,
   engineLabels: {}

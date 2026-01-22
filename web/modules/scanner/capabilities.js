@@ -26,6 +26,18 @@ function detectBrowserHint() {
   return 'Unknown';
 }
 
+function extractDeviceModel(ua) {
+  if (!ua) { return ''; }
+  if (/iPhone/i.test(ua)) { return 'iPhone'; }
+  if (/iPad/i.test(ua)) { return 'iPad'; }
+  if (/iPod/i.test(ua)) { return 'iPod'; }
+  var androidMatch = ua.match(/Android\s[\d.]+;\s*([^;)]*?)\s*Build/i);
+  if (androidMatch && androidMatch[1]) {
+    return androidMatch[1].trim();
+  }
+  return '';
+}
+
 function detectPlatformHint() {
   var ua = getUserAgent();
   var platform = getPlatformHint();
@@ -48,6 +60,7 @@ export function detectCapabilities() {
   var hasBarcodeDetector = (typeof BarcodeDetector === 'function');
   var hasDocument = (typeof document !== 'undefined');
   var hasFileConstructor = (typeof File === 'function');
+  var uaData = (navigator && navigator.userAgentData) ? navigator.userAgentData : null;
   var torchPossible = false;
   try {
     torchPossible = !!(typeof MediaStreamTrack !== 'undefined' && MediaStreamTrack.prototype &&
@@ -57,25 +70,38 @@ export function detectCapabilities() {
   var formatPromise = hasBarcodeDetector && typeof BarcodeDetector.getSupportedFormats === 'function'
     ? BarcodeDetector.getSupportedFormats()
     : Promise.resolve([]);
+  var uaPromise = uaData && typeof uaData.getHighEntropyValues === 'function'
+    ? uaData.getHighEntropyValues(['model', 'platformVersion']).catch(function () { return {}; })
+    : Promise.resolve({});
 
-  return Promise.resolve(formatPromise)
-    .catch(function () { return []; })
-    .then(function (formats) {
-      return {
-        userAgentHint: getUserAgent(),
-        platformHint: detectPlatformHint(),
-        browserHint: detectBrowserHint(),
-        hasMediaDevices: hasMediaDevices,
-        hasGetUserMedia: hasGetUserMedia,
-        hasWorkers: hasWorkers,
-        hasOffscreenCanvas: hasOffscreenCanvas,
-        hasWasm: hasWasm,
-        hasImageBitmap: hasImageBitmap,
-        hasBarcodeDetector: hasBarcodeDetector,
-        barcodeDetectorFormats: Array.isArray(formats) ? formats : [],
-        hasDocument: hasDocument,
-        hasFileConstructor: hasFileConstructor,
-        torchPossible: torchPossible
-      };
-    });
+  return Promise.all([
+    Promise.resolve(formatPromise).catch(function () { return []; }),
+    Promise.resolve(uaPromise)
+  ]).then(function (values) {
+    var formats = values[0];
+    var uaInfo = values[1] || {};
+    var deviceModel = uaInfo.model ? String(uaInfo.model) : '';
+    if (!deviceModel) {
+      deviceModel = extractDeviceModel(getUserAgent());
+    }
+    var platformVersion = uaInfo.platformVersion ? String(uaInfo.platformVersion) : '';
+    return {
+      userAgentHint: getUserAgent(),
+      platformHint: detectPlatformHint(),
+      platformVersion: platformVersion,
+      browserHint: detectBrowserHint(),
+      deviceModel: deviceModel,
+      hasMediaDevices: hasMediaDevices,
+      hasGetUserMedia: hasGetUserMedia,
+      hasWorkers: hasWorkers,
+      hasOffscreenCanvas: hasOffscreenCanvas,
+      hasWasm: hasWasm,
+      hasImageBitmap: hasImageBitmap,
+      hasBarcodeDetector: hasBarcodeDetector,
+      barcodeDetectorFormats: Array.isArray(formats) ? formats : [],
+      hasDocument: hasDocument,
+      hasFileConstructor: hasFileConstructor,
+      torchPossible: torchPossible
+    };
+  });
 }

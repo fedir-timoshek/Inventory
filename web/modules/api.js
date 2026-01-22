@@ -100,6 +100,10 @@ export function callApi(action, token, payload, options) {
     });
 }
 
+export function logScanStat(token, payload, options) {
+  return callApi('logScanStat', token, payload, options);
+}
+
 function isPlaceholder(value) {
   if (!value) { return false; }
   return value.indexOf('__') === 0 && value.lastIndexOf('__') === value.length - 2;

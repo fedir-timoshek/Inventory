@@ -2,6 +2,7 @@ import { appState, scannerState } from './state.js';
 import { dom } from './dom.js';
 import { showToast } from './toast.js';
 import { triggerVibrate } from './utils.js';
+import { recordScanStat } from './scan-stats.js';
 import { detectCapabilities } from './scanner/capabilities.js';
 import { getEngineRegistry, createSupportedEngines } from './scanner/engine-registry.js';
 import { createScanManager } from './scanner/scan-manager.js';
@@ -107,6 +108,21 @@ function showManualEntryPrompt(text) {
 function clearManualEntryPrompt() {
   if (dom.scanHelp) {
     dom.scanHelp.classList.add('hidden');
+  }
+}
+
+function armScanHintTimer() {
+  clearScanHintTimer();
+  scannerState.scanHintTimer = setTimeout(function () {
+    if (!appState.scanning) { return; }
+    showManualEntryPrompt('No barcode found. Improve lighting or distance.');
+  }, 10000);
+}
+
+function clearScanHintTimer() {
+  if (scannerState.scanHintTimer) {
+    clearTimeout(scannerState.scanHintTimer);
+    scannerState.scanHintTimer = null;
   }
 }
 
@@ -226,7 +242,7 @@ export function startScanner() {
         frameSource: frameSource,
         engines: engines,
         continuous: appState.continuousScanning,
-        timeoutMs: appState.continuousScanning ? 0 : 10000,
+        timeoutMs: 0,
         cooldownMs: scannerState.cooldownMs,
         validationOptions: {
           code39MinLen: 3,
@@ -244,12 +260,14 @@ export function startScanner() {
     .then(function () {
       if (!appState.scanning) { return; }
       setScanStatus('Scanning…', 'Scanning');
+      armScanHintTimer();
       armTorchCheck();
     })
     .catch(function (err) {
       appState.scanning = false;
       updateScanButton();
       updateTorchUI();
+      clearScanHintTimer();
       setScanStatus('Camera error: ' + (err && err.message ? err.message : ''), 'Error');
       showToast('Could not start camera. Check permissions.', 'error');
     });
@@ -282,8 +300,39 @@ function handleScanResult(result, metrics) {
     appState.scanning = false;
     updateScanButton();
     updateTorchUI();
+    clearScanHintTimer();
+  } else if (appState.scanning) {
+    armScanHintTimer();
   }
+  logScanStats(result, metrics);
   onBarcodeDetected(result.rawValue, result.format);
+}
+
+function logScanStats(result, metrics) {
+  if (!result) { return; }
+  var caps = scannerState.capabilities || {};
+  var scanMs = metrics && metrics.elapsedMs ? Math.round(metrics.elapsedMs) : null;
+  if (!scanMs && result.meta && result.meta.durationMs) {
+    scanMs = Math.round(result.meta.durationMs);
+  }
+  var engineName = (scannerState.engineLabels && result.engineId)
+    ? scannerState.engineLabels[result.engineId]
+    : '';
+  var osLabel = caps.platformHint || '';
+  if (caps.platformVersion) {
+    osLabel = osLabel ? (osLabel + ' ' + caps.platformVersion) : caps.platformVersion;
+  }
+  var payload = {
+    os: osLabel,
+    deviceModel: caps.deviceModel || '',
+    browser: caps.browserHint || '',
+    barcodeFormat: result.format || '',
+    scanMs: scanMs || '',
+    engineId: result.engineId || '',
+    engineName: engineName || result.engineId || '',
+    online: (typeof navigator !== 'undefined' && navigator.onLine === false) ? 'offline' : 'online'
+  };
+  recordScanStat(payload);
 }
 
 function handleScanTimeout() {
@@ -296,6 +345,7 @@ function handleScanTimeout() {
   if (scannerState.scanManager) {
     scannerState.scanManager = null;
   }
+  clearScanHintTimer();
 }
 
 function handleScanError(err) {
@@ -307,6 +357,7 @@ function handleScanError(err) {
   if (scannerState.scanManager) {
     scannerState.scanManager = null;
   }
+  clearScanHintTimer();
 }
 
 function handleEngineStatus(payload) {
@@ -317,6 +368,7 @@ function handleEngineStatus(payload) {
 export function stopScanner() {
   appState.scanning = false;
   clearManualEntryPrompt();
+  clearScanHintTimer();
   if (scannerState.scanManager && typeof scannerState.scanManager.stop === 'function') {
     scannerState.scanManager.stop();
   }

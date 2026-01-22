@@ -23,6 +23,7 @@ const ADMIN_EMAILS = [
 const INVENTORY_SHEET_NAME = 'Inventory';
 const ROOMS_SHEET_NAME = 'Rooms';
 const HISTORY_SHEET_NAME = 'History';
+const SCAN_STATS_SHEET_NAME = 'ScanStats';
 
 // How many recent entries to return to the UI
 const RECENT_ENTRIES_LIMIT = 100;
@@ -166,6 +167,9 @@ function handleApiAction_(action, token, payload) {
   }
   if (action === 'deleteEntry') {
     return deleteEntry(token, payload && payload.id ? payload.id : payload);
+  }
+  if (action === 'logScanStat') {
+    return logScanStat(token, payload);
   }
   throw new Error('Unknown action: ' + action);
 }
@@ -363,11 +367,98 @@ function deleteEntry(idToken, entryId) {
   return { success: true };
 }
 
+/**
+ * Logs scanner stats to the ScanStats sheet.
+ * payload = { os, deviceModel, browser, barcodeFormat, scanMs, engineId, engineName }
+ */
+function logScanStat(idToken, payload) {
+  getUserEmailFromToken_(idToken);
+  payload = payload || {};
+  var sheet = getScanStatsSheet_();
+  var now = new Date();
+  var os = sanitizeStatValue_(payload.os, 80);
+  var deviceModel = sanitizeStatValue_(payload.deviceModel, 120);
+  var browser = sanitizeStatValue_(payload.browser, 80);
+  var barcodeFormat = sanitizeStatValue_(payload.barcodeFormat || payload.format, 40);
+  var scanMs = parseInt(payload.scanMs, 10);
+  if (!scanMs || scanMs < 0) { scanMs = ''; }
+  var engineId = sanitizeStatValue_(payload.engineId, 80);
+  var engineName = sanitizeStatValue_(payload.engineName, 120);
+  var online = sanitizeStatValue_(payload.online, 12);
+
+  sheet.appendRow([
+    now,
+    os,
+    deviceModel,
+    browser,
+    barcodeFormat,
+    scanMs,
+    engineId,
+    engineName,
+    online
+  ]);
+
+  return { success: true };
+}
+
 
 /*************** HELPERS: SHEETS & DATA ***************/
 
 function getSpreadsheet_() {
   return SpreadsheetApp.openById(getConfig_().spreadsheetId);
+}
+
+function getScanStatsSheet_() {
+  var ss = getSpreadsheet_();
+  var sheet = ss.getSheetByName(SCAN_STATS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(SCAN_STATS_SHEET_NAME);
+  }
+  ensureScanStatsHeader_(sheet);
+  return sheet;
+}
+
+function ensureScanStatsHeader_(sheet) {
+  var headers = [
+    'Timestamp',
+    'OS',
+    'Device Model',
+    'Browser',
+    'Barcode Format',
+    'Scan Time (ms)',
+    'Engine Id',
+    'Engine Name',
+    'Online'
+  ];
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(headers);
+    sheet.setFrozenRows(1);
+    return;
+  }
+  var lastCol = Math.max(sheet.getLastColumn(), headers.length);
+  var row = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var needsUpdate = false;
+  for (var i = 0; i < headers.length; i++) {
+    if (!row[i]) {
+      row[i] = headers[i];
+      needsUpdate = true;
+    }
+  }
+  if (needsUpdate) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([row.slice(0, headers.length)]);
+  }
+  if (sheet.getFrozenRows() < 1) {
+    sheet.setFrozenRows(1);
+  }
+}
+
+function sanitizeStatValue_(value, maxLen) {
+  if (value === null || value === undefined) { return ''; }
+  var text = String(value).trim();
+  if (maxLen && text.length > maxLen) {
+    text = text.slice(0, maxLen);
+  }
+  return text;
 }
 
 function getSheetByName_(name) {
