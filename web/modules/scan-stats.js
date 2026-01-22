@@ -6,6 +6,7 @@ var scanStatsQueue = [];
 var syncInProgress = false;
 var syncQueued = false;
 var storageErrorNotified = false;
+var sendErrorNotified = false;
 
 export function loadScanStatsQueue() {
   scanStatsQueue = [];
@@ -39,6 +40,7 @@ export function recordScanStat(payload) {
       if (shouldQueueError_(err)) {
         enqueueStat(entry);
       }
+      notifySendError_(err, 'record');
     });
 }
 
@@ -60,6 +62,7 @@ export function syncScanStatsQueue() {
   }
   var remaining = [];
   var index = 0;
+  var syncErrorLogged = false;
 
   function processNext() {
     if (index >= items.length) {
@@ -76,6 +79,10 @@ export function syncScanStatsQueue() {
       .catch(function (err) {
         if (shouldQueueError_(err)) {
           remaining.push(item);
+        }
+        if (!syncErrorLogged) {
+          syncErrorLogged = true;
+          notifySendError_(err, 'sync');
         }
         processNext();
       });
@@ -156,9 +163,18 @@ function canSendNow_() {
 
 function shouldQueueError_(err) {
   if (!err) { return true; }
-  if (err.isNetworkError) { return true; }
-  if (typeof err.status === 'number' && err.status === 0) { return true; }
-  return false;
+  if (err.noQueue === true) { return false; }
+  return true;
+}
+
+function notifySendError_(err, context) {
+  if (sendErrorNotified) { return; }
+  sendErrorNotified = true;
+  try {
+    var message = err && err.message ? err.message : 'Unknown error';
+    var suffix = context ? (' (' + context + ')') : '';
+    console.warn('Scan stats upload failed' + suffix + ': ' + message);
+  } catch (e) {}
 }
 
 function buildLocalId(entry, index) {

@@ -1,4 +1,4 @@
-var CACHE_VERSION = 'inventory-scanner-v2';
+var CACHE_VERSION = 'inventory-scanner-v3';
 var PRECACHE_URLS = [
   './',
   './index.html',
