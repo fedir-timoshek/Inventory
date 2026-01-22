@@ -63,7 +63,9 @@ export function normalizeFormat(format) {
 function normalizeRawValue(value) {
   if (!value) { return ''; }
   var text = String(value);
-  text = text.replace(/\u0000/g, '');
+  if (text.indexOf('\u0000') !== -1) {
+    text = text.split('\u0000').join('');
+  }
   text = text.replace(/[\r\n]+/g, ' ');
   return text.trim();
 }
@@ -73,7 +75,7 @@ function normalizeCode39(value, options) {
   var cleaned = value.replace(/^\*+|\*+$/g, '');
   cleaned = cleaned.replace(/\s+/g, '');
   cleaned = cleaned.toUpperCase();
-  var allowed = /^[0-9A-Z\-\.\ \$\/\+\%]*$/;
+  var allowed = /^[0-9A-Z .$/+%-]*$/;
   if (!allowed.test(cleaned)) { return ''; }
   var minLen = (options && options.code39MinLen) ? options.code39MinLen : 3;
   var maxLen = (options && options.code39MaxLen) ? options.code39MaxLen : 64;
@@ -92,7 +94,7 @@ function normalizeCode128(value, options) {
 
 function looksLikeCode39(value) {
   if (!value) { return false; }
-  return /^[0-9A-Z\-\.\ \$\/\+\%\*]+$/i.test(value);
+  return /^[0-9A-Z .$/+%*-]+$/i.test(value);
 }
 
 export function normalizeScanResult(result, options) {

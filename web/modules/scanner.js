@@ -286,7 +286,7 @@ function handleScanResult(result, metrics) {
   onBarcodeDetected(result.rawValue, result.format);
 }
 
-function handleScanTimeout(meta) {
+function handleScanTimeout() {
   appState.scanning = false;
   updateScanButton();
   updateTorchUI();

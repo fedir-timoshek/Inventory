@@ -17,6 +17,18 @@ module.exports = [
     }
   },
   {
+    files: ['web/assets/workers/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      sourceType: 'script',
+      globals: {
+        ...globals.worker,
+        importScripts: 'readonly',
+        self: 'readonly'
+      }
+    }
+  },
+  {
     rules: {
       'no-empty': ['error', { allowEmptyCatch: true }],
       'no-unused-vars': ['error', { caughtErrors: 'none' }]
@@ -33,6 +45,11 @@ module.exports = [
     }
   },
   {
-    ignores: ['web/dist/**']
+    ignores: [
+      'web/dist/**',
+      'web/assets/vendor/**',
+      'web/assets/wasm/**',
+      'web/assets/scan-tests/**'
+    ]
   }
 ];
