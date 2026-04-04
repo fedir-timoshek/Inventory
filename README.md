@@ -27,26 +27,58 @@ The backend expects the Inventory sheet columns in this exact order:
 | I      | Deleted    | TRUE/FALSE (soft delete) |
 
 Other tabs:
-- `Rooms` - list of rooms in column A (from row 2).
-- `History` - audit log (auto-written by the API).
+- `Rooms` - list of rooms in column A (header must be `Room` in A1).
+- `History` - audit log (header row required).
+- `ScanStats` - optional operational sheet; auto-created by the API if missing.
+
+## Workbook contract hardening
+The Apps Script backend now fails closed before serving inventory data whenever the workbook contract is unsafe:
+
+- `Inventory` headers A:I must stay exactly `ID, Timestamp, Barcode, Room, Quantity, Notes, Image URL, User Email, Deleted`
+- `Rooms!A1` must be `Room`
+- `History` must exist and contain a header row
+- legacy rows with blank `Quantity` are treated as a migration state, not silently defaulted to `1`
+
+### Admin diagnostics and backfill
+Admins can inspect the workbook state through the API actions:
+
+- `getAdminDiagnostics` - returns `{ ok, issues, sheetFacts, migrationNeeded }`
+- `runQuantityBackfill` - admin-only quantity migration
+
+Recommended migration flow:
+
+1. Run `getAdminDiagnostics` and confirm the only non-blocking issue is blank `Quantity` rows.
+2. Run `runQuantityBackfill` with `{ dryRun: true }` to inspect affected row counts and sample IDs.
+3. Run `runQuantityBackfill` with `{ dryRun: false }` to write `Quantity = 1` into blank rows only.
+4. Re-run `getAdminDiagnostics` and confirm `migrationNeeded: false`.
 
 ## Backend setup (Apps Script)
 1) Open your Google Sheet and make sure it has the tabs: `Inventory`, `Rooms`, `History`.
-2) Insert the `Quantity` column between `Room` and `Notes` (column E). This shifts Notes to F, Image URL to G, User Email to H, Deleted to I.
-3) Fill column E (`Quantity`) with `1` for existing rows.
-4) Open Apps Script and replace the project code with `appscript/code.gs`.
-5) Set Script Properties (Apps Script -> Project Settings -> Script properties):
+2) Make sure the `Inventory` tab columns A:I are exactly `ID, Timestamp, Barcode, Room, Quantity, Notes, Image URL, User Email, Deleted`.
+3) Make sure `Rooms!A1` is `Room`.
+4) If historical rows have blank `Quantity`, do not keep using the workbook in that state. Use the admin diagnostics/backfill flow below.
+5) Open Apps Script and replace the project code with `appscript/code.gs`.
+6) Set Script Properties (Apps Script -> Project Settings -> Script properties):
    - `INVENTORY_SPREADSHEET_ID`
    - `IMAGE_FOLDER_ID`
    - `TIMEZONE`
    - `GOOGLE_CLIENT_ID`
    - `ADMIN_EMAILS` (comma-separated list)
-6) Deploy the Apps Script as a Web App:
+7) Deploy the Apps Script as a Web App:
    - Deploy -> New deployment -> Web app
    - Execute as: Me
    - Who has access: Anyone
    - Copy the Web App URL
-7) If you change Apps Script code later, deploy a new version.
+8) If you change Apps Script code later, deploy a new version.
+
+### Manual operator flow in Apps Script
+If you need to inspect or repair a workbook from the Apps Script editor:
+
+1. Run `getWorkbookContractReport_()` from the Apps Script editor to inspect the current sheet contract.
+2. If the report only shows blank `Quantity` rows, run `backfillInventoryQuantity_({ dryRun: true })`.
+3. Review the affected row count and sample IDs.
+4. Run `backfillInventoryQuantity_({ dryRun: false })` to apply the one-time migration.
+5. Re-run `getWorkbookContractReport_()` and verify `migrationNeeded` is now `false`.
 
 ## OAuth setup (Google Cloud)
 1) Create an OAuth Client ID (Web application).
@@ -93,11 +125,13 @@ Then open `http://localhost:8000`.
 
 ## Troubleshooting
 - **Entries missing:** non-admins only see their own entries. Check `User Email` values in the sheet.
-- **Quantity not saving:** verify the Inventory column order matches the schema above.
+- **Workbook contract error:** verify the `Inventory` header order, `Rooms!A1`, and that `History` still has a header row. If the error mentions blank `Quantity`, run diagnostics/backfill as an admin before retrying.
+- **Quantity not saving:** verify the Inventory column order matches the schema above and that the workbook is not in `migrationNeeded` state.
 - **Login fails:** check `api-url`, OAuth Client ID, and Apps Script deployment.
 - **Camera/torch issues:** HTTPS is required for camera access. Torch support depends on the device.
 - **Nothing works locally:** use a local server (`python3 -m http.server`).
 
 ## Notes
 - The API validates Google ID tokens server-side.
+- Inventory reads and writes are now blocked while the workbook contract is invalid or needs quantity migration.
 - If you redeploy Apps Script, update the Web App URL in `web/index.html`.
