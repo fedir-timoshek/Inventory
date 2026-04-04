@@ -53,6 +53,33 @@ const COL = {
   DELETED: 9     // TRUE/FALSE for soft delete
 };
 
+const INVENTORY_HEADERS = [
+  'ID',
+  'Timestamp',
+  'Barcode',
+  'Room',
+  'Quantity',
+  'Notes',
+  'Image URL',
+  'User Email',
+  'Deleted'
+];
+
+const HISTORY_HEADERS = [
+  'Timestamp',
+  'Action',
+  'Entry ID',
+  'User Email',
+  'Old Values (JSON)',
+  'New Values (JSON)'
+];
+
+const CONTRACT_STATUS = {
+  CANONICAL: 'canonical',
+  LEGACY_BLANK_QUANTITY: 'legacy_blank_quantity',
+  INVALID_SHAPE: 'invalid_shape'
+};
+
 var CONFIG_CACHE = null;
 
 function getConfig_() {
@@ -135,6 +162,7 @@ function doPost(e) {
 function getInitialData(idToken) {
   var userEmail = getUserEmailFromToken_(idToken);
   var isAdmin = isAdmin_(userEmail);
+  assertWorkbookContract_();
   var rooms = getRooms_();
   var entries = isAdmin ? listEntries_(RECENT_ENTRIES_LIMIT) : listEntries_(RECENT_ENTRIES_LIMIT, userEmail);
   getScanStatsSheet_();
@@ -153,6 +181,12 @@ function handleApiAction_(action, token, payload) {
   }
   if (action === 'getInitialData') {
     return getInitialData(token);
+  }
+  if (action === 'getAdminDiagnostics') {
+    return getAdminDiagnostics(token);
+  }
+  if (action === 'runQuantityBackfill') {
+    return runQuantityBackfill(token, payload);
   }
   if (action === 'saveEntry') {
     return saveEntry(token, payload);
@@ -181,6 +215,7 @@ function handleApiAction_(action, token, payload) {
  */
 function saveEntry(idToken, formData) {
   var userEmail = getUserEmailFromToken_(idToken);
+  assertWorkbookContract_();
   var sheet = getSheetByName_(INVENTORY_SHEET_NAME);
 
   var barcode = (formData && formData.barcode || '').toString().trim();
@@ -242,6 +277,7 @@ function saveEntry(idToken, formData) {
  */
 function uploadEntryImage(idToken, payload) {
   var userEmail = getUserEmailFromToken_(idToken);
+  assertWorkbookContract_();
   if (!payload || !payload.id) {
     throw new Error('Missing entry ID.');
   }
@@ -280,6 +316,7 @@ function uploadEntryImage(idToken, payload) {
 function listEntries(idToken, limit) {
   var userEmail = getUserEmailFromToken_(idToken);
   var isAdmin = isAdmin_(userEmail);
+  assertWorkbookContract_();
   limit = limit || RECENT_ENTRIES_LIMIT;
   return isAdmin ? listEntries_(limit) : listEntries_(limit, userEmail);
 }
@@ -290,6 +327,7 @@ function listEntries(idToken, limit) {
  */
 function updateEntry(idToken, entryData) {
   var userEmail = getUserEmailFromToken_(idToken);
+  assertWorkbookContract_();
   if (!isAdmin_(userEmail)) {
     throw new Error('You do not have permission to update entries.');
   }
@@ -339,6 +377,7 @@ function updateEntry(idToken, entryData) {
  */
 function deleteEntry(idToken, entryId) {
   var userEmail = getUserEmailFromToken_(idToken);
+  assertWorkbookContract_();
   if (!isAdmin_(userEmail)) {
     throw new Error('You do not have permission to delete entries.');
   }
@@ -418,6 +457,22 @@ function logScanStat(idToken, payload) {
   return { success: true };
 }
 
+function getAdminDiagnostics(idToken) {
+  var userEmail = getUserEmailFromToken_(idToken);
+  if (!isAdmin_(userEmail)) {
+    throw new Error('You do not have permission to view diagnostics.');
+  }
+  return getWorkbookContractReport_();
+}
+
+function runQuantityBackfill(idToken, payload) {
+  var userEmail = getUserEmailFromToken_(idToken);
+  if (!isAdmin_(userEmail)) {
+    throw new Error('You do not have permission to run quantity backfill.');
+  }
+  return backfillInventoryQuantity_(payload, userEmail);
+}
+
 
 /*************** HELPERS: SHEETS & DATA ***************/
 
@@ -489,6 +544,393 @@ function sanitizeStatValue_(value, maxLen) {
     text = text.slice(0, maxLen);
   }
   return text;
+}
+
+function getWorkbookContractReport_() {
+  var ss = getSpreadsheet_();
+  var issues = [];
+  var sheetFacts = {};
+  var migrationRows = [];
+  var invalidRows = [];
+
+  var inventorySheet = ss.getSheetByName(INVENTORY_SHEET_NAME);
+  if (!inventorySheet) {
+    issues.push({
+      code: 'missing_inventory_sheet',
+      severity: 'blocking',
+      message: 'Missing required sheet: ' + INVENTORY_SHEET_NAME + '.'
+    });
+  } else {
+    sheetFacts.inventory = inspectInventoryContract_(inventorySheet, migrationRows, invalidRows, issues);
+  }
+
+  var roomsSheet = ss.getSheetByName(ROOMS_SHEET_NAME);
+  if (!roomsSheet) {
+    issues.push({
+      code: 'missing_rooms_sheet',
+      severity: 'blocking',
+      message: 'Missing required sheet: ' + ROOMS_SHEET_NAME + '.'
+    });
+  } else {
+    sheetFacts.rooms = inspectRoomsContract_(roomsSheet, issues);
+  }
+
+  var historySheet = ss.getSheetByName(HISTORY_SHEET_NAME);
+  if (!historySheet) {
+    issues.push({
+      code: 'missing_history_sheet',
+      severity: 'blocking',
+      message: 'Missing required sheet: ' + HISTORY_SHEET_NAME + '.'
+    });
+  } else {
+    sheetFacts.history = inspectHistoryContract_(historySheet, issues);
+  }
+
+  var scanStatsSheet = ss.getSheetByName(SCAN_STATS_SHEET_NAME);
+  sheetFacts.scanStats = {
+    exists: !!scanStatsSheet
+  };
+  if (scanStatsSheet) {
+    sheetFacts.scanStats.header = readHeaderRow_(scanStatsSheet, Math.max(scanStatsSheet.getLastColumn(), 10));
+  }
+
+  return {
+    ok: !hasBlockingContractIssue_(issues),
+    issues: issues,
+    migrationNeeded: migrationRows.length > 0,
+    sheetFacts: sheetFacts,
+    migrationRows: migrationRows,
+    invalidRows: invalidRows
+  };
+}
+
+function assertWorkbookContract_() {
+  var report = getWorkbookContractReport_();
+  if (hasBlockingContractIssue_(report.issues)) {
+    throw new Error(formatContractIssues_(report.issues));
+  }
+  if (report.migrationNeeded) {
+    throw new Error(
+      'Workbook contract requires quantity migration before reads or writes can continue. ' +
+      'Run getAdminDiagnostics or runQuantityBackfill as an admin.'
+    );
+  }
+  return report;
+}
+
+function inspectInventoryContract_(sheet, migrationRows, invalidRows, issues) {
+  var lastCol = Math.max(sheet.getLastColumn(), INVENTORY_HEADERS.length);
+  var header = readHeaderRow_(sheet, lastCol);
+  var extraHeaders = [];
+  var i;
+  for (i = 0; i < INVENTORY_HEADERS.length; i++) {
+    if ((header[i] || '') !== INVENTORY_HEADERS[i]) {
+      issues.push({
+        code: 'inventory_header_mismatch',
+        severity: 'blocking',
+        message: 'Inventory header mismatch at column ' + columnNumberToLetter_(i + 1) +
+          ': expected "' + INVENTORY_HEADERS[i] + '" but found "' + (header[i] || '') + '".'
+      });
+    }
+  }
+  for (i = INVENTORY_HEADERS.length; i < header.length; i++) {
+    if (!isBlankValue_(header[i])) {
+      extraHeaders.push({
+        column: columnNumberToLetter_(i + 1),
+        header: header[i]
+      });
+    }
+  }
+  if (extraHeaders.length) {
+    issues.push({
+      code: 'inventory_extra_headers',
+      severity: 'blocking',
+      message: 'Inventory has unexpected extra headers beyond column I: ' +
+        extraHeaders.map(function (item) { return item.column + '="' + item.header + '"'; }).join(', ') + '.'
+    });
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    return {
+      header: header.slice(0, INVENTORY_HEADERS.length),
+      rowCount: 0,
+      migrationRows: 0,
+      invalidRows: 0
+    };
+  }
+
+  var values = sheet.getRange(2, 1, lastRow - 1, INVENTORY_HEADERS.length).getValues();
+  for (i = 0; i < values.length; i++) {
+    if (isInventoryRowEmpty_(values[i])) {
+      continue;
+    }
+    var rowNumber = i + 2;
+    var compatibility = detectInventoryRowCompatibility_(values[i], rowNumber);
+    if (compatibility.status === CONTRACT_STATUS.LEGACY_BLANK_QUANTITY) {
+      migrationRows.push(compatibility);
+      issues.push({
+        code: 'inventory_quantity_backfill_needed',
+        severity: 'migration',
+        rowNumber: rowNumber,
+        entryId: compatibility.entryId,
+        message: 'Inventory row ' + rowNumber + ' (' + compatibility.entryId + ') has blank Quantity and needs backfill.'
+      });
+    } else if (compatibility.status === CONTRACT_STATUS.INVALID_SHAPE) {
+      invalidRows.push(compatibility);
+      issues.push({
+        code: 'inventory_invalid_row',
+        severity: 'blocking',
+        rowNumber: rowNumber,
+        entryId: compatibility.entryId,
+        message: 'Inventory row ' + rowNumber + ' (' + compatibility.entryId + ') is invalid: ' +
+          compatibility.issues.join('; ') + '.'
+      });
+    }
+  }
+
+  return {
+    header: header.slice(0, INVENTORY_HEADERS.length),
+    rowCount: values.length,
+    migrationRows: migrationRows.length,
+    invalidRows: invalidRows.length
+  };
+}
+
+function inspectRoomsContract_(sheet, issues) {
+  var header = readHeaderRow_(sheet, Math.max(sheet.getLastColumn(), 1));
+  if ((header[0] || '') !== 'Room') {
+    issues.push({
+      code: 'rooms_header_mismatch',
+      severity: 'blocking',
+      message: 'Rooms!A1 must be "Room" but found "' + (header[0] || '') + '".'
+    });
+  }
+  return {
+    header: header.slice(0, 1),
+    rowCount: Math.max(0, sheet.getLastRow() - 1)
+  };
+}
+
+function inspectHistoryContract_(sheet, issues) {
+  var header = readHeaderRow_(sheet, Math.max(sheet.getLastColumn(), HISTORY_HEADERS.length));
+  var hasAnyHeader = false;
+  for (var i = 0; i < header.length; i++) {
+    if (!isBlankValue_(header[i])) {
+      hasAnyHeader = true;
+      break;
+    }
+  }
+  if (!hasAnyHeader) {
+    issues.push({
+      code: 'history_header_missing',
+      severity: 'blocking',
+      message: 'History must contain a header row.'
+    });
+  }
+  return {
+    header: header.slice(0, HISTORY_HEADERS.length),
+    rowCount: Math.max(0, sheet.getLastRow() - 1)
+  };
+}
+
+function detectInventoryRowCompatibility_(row, rowNumber) {
+  var issues = [];
+  var entryId = sanitizeContractCell_(row[COL.ID - 1]);
+  var barcode = sanitizeContractCell_(row[COL.BARCODE - 1]);
+  var room = sanitizeContractCell_(row[COL.ROOM - 1]);
+  var quantityCell = row[COL.QUANTITY - 1];
+  var userEmail = sanitizeContractCell_(row[COL.USER_EMAIL - 1]);
+  var deletedCell = row[COL.DELETED - 1];
+
+  if (!entryId) {
+    issues.push('missing ID');
+  }
+  if (!isDateLikeValue_(row[COL.TIMESTAMP - 1])) {
+    issues.push('invalid Timestamp');
+  }
+  if (!barcode) {
+    issues.push('missing Barcode');
+  }
+  if (!room) {
+    issues.push('missing Room');
+  }
+  if (!userEmail) {
+    issues.push('missing User Email');
+  }
+  if (!isBooleanCell_(deletedCell)) {
+    issues.push('invalid Deleted flag');
+  }
+
+  if (isBlankValue_(quantityCell)) {
+    if (!issues.length) {
+      return {
+        status: CONTRACT_STATUS.LEGACY_BLANK_QUANTITY,
+        rowNumber: rowNumber,
+        entryId: entryId || ('row-' + rowNumber),
+        issues: ['blank Quantity']
+      };
+    }
+    issues.push('blank Quantity');
+    return {
+      status: CONTRACT_STATUS.INVALID_SHAPE,
+      rowNumber: rowNumber,
+      entryId: entryId || ('row-' + rowNumber),
+      issues: issues
+    };
+  }
+
+  var quantity = parseInt(quantityCell, 10);
+  if (!quantity || quantity < 1 || String(quantity) !== String(quantityCell).trim()) {
+    issues.push('invalid Quantity');
+  }
+
+  return {
+    status: issues.length ? CONTRACT_STATUS.INVALID_SHAPE : CONTRACT_STATUS.CANONICAL,
+    rowNumber: rowNumber,
+    entryId: entryId || ('row-' + rowNumber),
+    issues: issues
+  };
+}
+
+function backfillInventoryQuantity_(options, actorEmail) {
+  options = options || {};
+  var defaultQty = parseInt(options.defaultQty, 10);
+  if (!defaultQty || defaultQty !== 1) {
+    defaultQty = 1;
+  }
+  var dryRun = options.dryRun !== false;
+  var report = getWorkbookContractReport_();
+
+  if (hasBlockingContractIssue_(report.issues)) {
+    throw new Error(formatContractIssues_(report.issues));
+  }
+
+  if (!report.migrationNeeded) {
+    return {
+      ok: true,
+      dryRun: dryRun,
+      migratedRows: 0,
+      sampleEntryIds: [],
+      message: 'No blank Quantity rows found.'
+    };
+  }
+
+  var sheet = getSheetByName_(INVENTORY_SHEET_NAME);
+  var targets = report.migrationRows;
+
+  if (!dryRun) {
+    for (var i = 0; i < targets.length; i++) {
+      sheet.getRange(targets[i].rowNumber, COL.QUANTITY).setValue(defaultQty);
+    }
+    logHistory_(
+      'MIGRATION_QUANTITY_BACKFILL',
+      'WORKBOOK_CONTRACT',
+      actorEmail || 'admin',
+      null,
+      {
+        defaultQuantity: defaultQty,
+        migratedRows: targets.length,
+        rowNumbers: targets.map(function (item) { return item.rowNumber; }),
+        entryIds: targets.map(function (item) { return item.entryId; })
+      }
+    );
+  }
+
+  return {
+    ok: true,
+    dryRun: dryRun,
+    migratedRows: targets.length,
+    sampleEntryIds: targets.slice(0, 10).map(function (item) { return item.entryId; }),
+    rowNumbers: targets.map(function (item) { return item.rowNumber; }),
+    message: dryRun
+      ? 'Dry run complete. Re-run with dryRun=false to write Quantity=1.'
+      : 'Quantity backfill complete.'
+  };
+}
+
+function hasBlockingContractIssue_(issues) {
+  for (var i = 0; i < issues.length; i++) {
+    if (issues[i].severity === 'blocking') {
+      return true;
+    }
+  }
+  return false;
+}
+
+function formatContractIssues_(issues) {
+  var blocking = issues.filter(function (issue) {
+    return issue.severity === 'blocking';
+  });
+  var migration = issues.filter(function (issue) {
+    return issue.severity === 'migration';
+  });
+  var parts = [];
+  if (blocking.length) {
+    parts.push('Workbook contract check failed: ' + blocking.map(function (issue) {
+      return issue.message;
+    }).join(' '));
+  }
+  if (migration.length) {
+    parts.push('Migration needed: ' + migration.length + ' Inventory row(s) have blank Quantity.');
+  }
+  return parts.join(' ');
+}
+
+function readHeaderRow_(sheet, length) {
+  if (sheet.getLastRow() < 1) {
+    return [];
+  }
+  return sheet.getRange(1, 1, 1, length).getValues()[0].map(function (value) {
+    return sanitizeContractCell_(value);
+  });
+}
+
+function sanitizeContractCell_(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value).trim();
+}
+
+function isBlankValue_(value) {
+  return value === null || value === undefined || String(value).trim() === '';
+}
+
+function isDateLikeValue_(value) {
+  if (value instanceof Date) {
+    return !isNaN(value.getTime());
+  }
+  if (isBlankValue_(value)) {
+    return false;
+  }
+  var date = new Date(value);
+  return !isNaN(date.getTime());
+}
+
+function isBooleanCell_(value) {
+  return isBlankValue_(value) || value === true || value === false || value === 'TRUE' || value === 'FALSE';
+}
+
+function isInventoryRowEmpty_(row) {
+  for (var i = 0; i < row.length; i++) {
+    if (!isBlankValue_(row[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function columnNumberToLetter_(columnNumber) {
+  var dividend = columnNumber;
+  var columnName = '';
+  var modulo;
+  while (dividend > 0) {
+    modulo = (dividend - 1) % 26;
+    columnName = String.fromCharCode(65 + modulo) + columnName;
+    dividend = Math.floor((dividend - modulo) / 26);
+  }
+  return columnName;
 }
 
 function getSheetByName_(name) {
@@ -608,7 +1050,9 @@ function listEntries_(limit, userEmailFilter) {
  */
 function rowToEntryObject_(row) {
   var qty = parseInt(row[COL.QUANTITY - 1], 10);
-  if (!qty || qty < 1) { qty = 1; }
+  if (!qty || qty < 1) {
+    throw new Error('Inventory row has invalid Quantity for entry ' + (row[COL.ID - 1] || 'unknown') + '.');
+  }
   return {
     id: row[COL.ID - 1] || '',
     timestamp: formatDate_(row[COL.TIMESTAMP - 1]),
